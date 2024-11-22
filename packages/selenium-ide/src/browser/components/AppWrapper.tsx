@@ -7,15 +7,13 @@ import '@fontsource/roboto/400.css'
 import '@fontsource/roboto/500.css'
 import '@fontsource/roboto/700.css'
 import React, { FC } from 'react'
+import { IntlProvider } from 'react-intl'
 
-interface AppWrapperProps {
-  className?: string
-}
-
+type AppWrapperProps = Pick<React.HTMLAttributes<HTMLDivElement>, 'children'>
 const AppWrapper: FC<AppWrapperProps> = ({ children }) => {
   const [themePref, setThemePref] = React.useState<ThemePref>('System')
   React.useEffect(() => {
-    if (!window?.sideAPI?.state) return;
+    if (!window?.sideAPI?.state) return
     window.sideAPI.state
       .getUserPrefs()
       .then((prefs) => setThemePref(prefs.themePref || 'System'))
@@ -32,12 +30,21 @@ const AppWrapper: FC<AppWrapperProps> = ({ children }) => {
       }),
     [prefersDarkMode]
   )
+  const [languageMap, setLanguageMap] = React.useState<any>({})
+  React.useEffect(() => {
+    window.sideAPI.system.getLanguageMap(true).then((result) => {
+      setLanguageMap(result)
+    })
+  }, [])
 
   return (
-    <ThemeProvider theme={theme}>
-      <CssBaseline />
-      {children}
-    </ThemeProvider>
+    <IntlProvider defaultLocale="en" messages={languageMap}>
+      {/* @ts-expect-error react-intl has funky versions */}
+      <ThemeProvider theme={theme}>
+        <CssBaseline />
+        {children}
+      </ThemeProvider>
+    </IntlProvider>
   )
 }
 

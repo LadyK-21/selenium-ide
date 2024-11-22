@@ -16,7 +16,7 @@
 // under the License.
 
 import * as fs from 'fs-extra'
-import * as path from 'path'
+import * as path from 'node:path'
 import * as os from 'os'
 import { Arch, downloadDriver as doDownloadDriver } from '@seleniumhq/get-driver'
 import { BrowserInfo } from 'main/types'
@@ -27,6 +27,9 @@ const downloadDriver = async (browserInfo: BrowserInfo) => {
     return;
   }
   const downloadDirectory = path.join(__dirname, '../files')
+  if (!(await fs.pathExists(downloadDirectory))) {
+    await fs.mkdir(downloadDirectory)
+  }
   const chromedrivers = (
     await fs.readdir(path.join(__dirname, '../files'))
   ).filter((file) => file.startsWith('chromedriver'))
@@ -40,7 +43,6 @@ const downloadDriver = async (browserInfo: BrowserInfo) => {
   }
 
   if (shouldDownload) {
-    console.log(`downloading chromedriver for chrome version ${browserInfo.version}...`)
     await doDownloadDriver({
       downloadDirectory,
       browser: 'chrome',

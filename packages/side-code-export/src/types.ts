@@ -4,7 +4,11 @@ import {
   SuiteShape,
   TestShape,
 } from '@seleniumhq/side-model'
-import { ExportFlexCommandShape, VariableLookup } from './code-export'
+import {
+  EmitterContext,
+  ExportFlexCommandShape,
+  VariableLookup,
+} from './code-export'
 
 import Hook, { LanguageHooks } from './code-export/hook'
 
@@ -12,16 +16,12 @@ export type LanguageExportExtras = {
   emitWaitForWindow: () => Promise<{
     name: string
     commands: ExportCommandShape[]
-    generateMethodDeclaration: (name: string) =>
-      | string
-      | {
-          body: string
-          terminatingKeyword: string
-        }
+    generateMethodDeclaration: LanguageEmitterOpts['generateMethodDeclaration']
   }>
   emitNewWindowHandling: (
     command: CommandShape,
-    emittedCommand: string
+    emittedCommand: string,
+    context: EmitterContext
   ) => Promise<ExportFlexCommandShape>
 }
 
@@ -61,18 +61,20 @@ export interface EmitOptions {
   isOptional?: boolean
   test?: TestShape
   suite?: SuiteShape
-  tests: TestShape[]
-  project: ProjectShape
+  tests?: TestShape[]
+  project?: ProjectShape
   startingSyntaxOptions?: any
 }
 
 export type PrebuildEmitter = (
   target: string,
-  value: string
+  value: string,
+  context: EmitterContext
 ) => Promise<ExportFlexCommandShape>
 
 export type LanguageExportEmitterEmit = (
-  command: CommandShape
+  command: CommandShape,
+  context: EmitterContext
 ) => Promise<ExportFlexCommandShape> | ExportFlexCommandShape
 
 export type LanguageExportEmitter = {
@@ -82,6 +84,13 @@ export type LanguageExportEmitter = {
   register: (command: string, emitter: PrebuildEmitter) => void
 }
 
+export type GenerateMethodDeclaration = (name: string) =>
+  | string
+  | {
+      body: string
+      terminatingKeyword: string
+    }
+
 export interface LanguageEmitterOpts {
   commentPrefix: string
   commandPrefixPadding: string
@@ -89,14 +98,11 @@ export interface LanguageEmitterOpts {
   emitter: LanguageExportEmitter
   fileExtension: string
   generateFilename: (name: string) => string
-  generateMethodDeclaration: (name: string) =>
-    | string
-    | {
-        body: string
-        terminatingKeyword: string
-      }
+  generateMethodDeclaration: GenerateMethodDeclaration
   generateSuiteDeclaration: (name: string) => string
+  generateSuiteCompletion?: (name: string) => string
   generateTestDeclaration: (name: string) => string
+  generateTestCompletion?: (name: string) => string
   hooks: LanguageHooks
   name: string
   terminatingKeyword: string

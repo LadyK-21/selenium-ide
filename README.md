@@ -1,4 +1,4 @@
-# Selenium IDE &middot; [![Build Status](https://api.travis-ci.com/SeleniumHQ/selenium-ide.svg?branch=trunk)](https://travis-ci.com/SeleniumHQ/selenium-ide)
+# Selenium IDE
 
 ![logo](https://www.seleniumhq.org/selenium-ide/img/selenium-ide128.png)
 
@@ -9,13 +9,9 @@ Selenium IDE as an electron application written to enable recording and playback
 
 Installation can be performed in a variety of ways:
 
-1. Prepackaged binaries will be able to be installed directly (ok not yet, but very soon)
-2. The application can be built manually using the below instructions.
-
-### Prepackaged
-
-No binaries are available currently, as we are in the process of obtaining signing certificates.
-Sorry, my bad.
+1. Prepackaged binaries are available to be installed directly as github releases.
+2. Selenium-ide can be installed via npm `npm install -g selenium-ide` and run via `selenium-ide` directly.
+3. The application can be built manually using the below instructions.
 
 ### Building Manually
 
@@ -24,7 +20,7 @@ To build manually, you must have the below prerequisites installed and follow th
 #### Prerequisites
 
 - [Git](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git)
-- [NodeJS v16 or later](https://nodejs.org/en/download/)
+- [NodeJS v16](https://nodejs.org/en/download/)
 - [Pnpm](https://pnpm.io/installation)
 
 #### Building

@@ -1,7 +1,7 @@
 {
-  "name": "@seleniumhq/selenium-ide",
-  "version": "4.0.0-alpha.32",
-  "private": true,
+  "name": "selenium-ide",
+  "version": "4.0.1-beta.14",
+  "private": false,
   "description": "Selenium IDE electron app",
   "author": "Todd <tarsitodd@gmail.com>",
   "homepage": "http://github.com/SeleniumHQ/selenium-ide",
@@ -9,12 +9,22 @@
   "scripts": {
     "clean": "rimraf build dist files node_modules tsconfig.tsbuildinfo",
     "start": "electron build/main-bundle.js",
+    "dev": "SIDE_DEV=1 electron build/main-bundle.js",
     "build": "run-s build:webpack build:electron",
-    "build:electron": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder -mwl -c.electronVersion $(node -e \"console.log(require('electron/package.json').version)\") --publish never",
+    "build:electron": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder -mwl --publish never",
     "build:electron:dir": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --dir",
-    "build:electron:windows": "node_modules\\.bin\\electron-builder",
+    "build:electron:mac": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder -m --publish never",
     "build:webpack": "webpack",
-    "watch": "webpack --watch"
+    "install-app-deps": "electron-builder install-app-deps",
+    "publish:electron:linux": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder -l --publish always",
+    "publish:electron:mac": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder -m --publish always",
+    "publish:electron:windows": "electron-builder -w --publish always",
+    "release": "electron-builder",
+    "serve": "SIDE_DEV=1 webpack serve",
+    "watch": "webpack watch"
+  },
+  "bin": {
+    "selenium-ide": "bin.js"
   },
   "sideEffects": false,
   "main": "build/main-bundle.js",
@@ -26,7 +36,7 @@
     "url": "https://github.com/SeleniumHQ/selenium-ide/issues"
   },
   "engines": {
-    "node": "16.x"
+    "node": ">=18"
   },
   "build": {
     "appId": "org.seleniumhq.selenium-ide",
@@ -42,16 +52,16 @@
     ],
     "directories": {
       "buildResources": "resources"
-    },
+    }, 
     "productName": "Selenium IDE",
     "mac": {
       "target": {
         "target": "default",
-        "arch": [
-          "arm64",
-          "x64"
-        ]
+        "arch": "universal"
       },
+      "singleArchFiles": "*",
+      "x64ArchFiles": "*",
+      "mergeASARs": false,
       "category": "public.app-category.developer-tools",
       "darkModeSupport": true
     },
@@ -70,12 +80,22 @@
       ]
     },
     "win": {
+      "publish": [
+        {
+          "provider": "github",
+          "owner": "SeleniumHQ",
+          "repo": "selenium-ide"
+        }
+      ],
       "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false
     },
     "linux": {
       "target": "AppImage"
     },
-    "nodeVersion": "16.x",
+    "nodeVersion": "18.x",
     "fileAssociations": [
       {
         "ext": "side",
@@ -93,69 +113,70 @@
     "hoistingLimits": "workspaces"
   },
   "dependencies": {
-    "@emotion/react": "^11.8.1",
-    "@emotion/styled": "^11.8.1",
-    "@fontsource/roboto": "^4.5.0",
-    "@mui/icons-material": "^5.5.0",
-    "@mui/lab": "^5.0.0-alpha.72",
-    "@mui/material": "^5.5.0",
-    "@seleniumhq/code-export-csharp-nunit": "^4.0.0-alpha.0",
-    "@seleniumhq/code-export-csharp-xunit": "^4.0.0-alpha.0",
-    "@seleniumhq/code-export-java-junit": "^4.0.0-alpha.0",
-    "@seleniumhq/code-export-javascript-mocha": "^4.0.0-alpha.0",
-    "@seleniumhq/code-export-python-pytest": "^4.0.0-alpha.0",
-    "@seleniumhq/code-export-ruby-rspec": "^4.0.0-alpha.0",
-    "@seleniumhq/side-code-export": "^4.0.0-alpha.2",
-    "@seleniumhq/get-driver": "^4.0.0-alpha.1",
-    "@seleniumhq/side-api": "^4.0.0-alpha.17",
-    "@seleniumhq/side-model": "^4.0.0-alpha.2",
-    "@seleniumhq/side-plugin-example": "^4.0.0-alpha.1",
-    "@seleniumhq/side-runtime": "^4.0.0-alpha.18",
-    "dnd-core": "16.0.1",
-    "electron-chromedriver": "^18.0.0",
-    "electron-log": "^4.4.8",
+    "@emotion/react": "^11.11.1",
+    "@emotion/styled": "^11.11.0",
+    "@fontsource/roboto": "^5.0.8",
+    "@mui/icons-material": "^5.15.13",
+    "@mui/material": "^5.15.13",
+    "@seleniumhq/code-export-csharp-nunit": "4.0.13",
+    "@seleniumhq/code-export-csharp-xunit": "4.0.13",
+    "@seleniumhq/code-export-java-junit": "4.0.13",
+    "@seleniumhq/code-export-javascript-mocha": "4.0.13",
+    "@seleniumhq/code-export-python-pytest": "4.0.13",
+    "@seleniumhq/code-export-ruby-rspec": "4.0.13",
+    "@seleniumhq/get-driver": "4.0.13",
+    "@seleniumhq/side-api": "4.0.13",
+    "@seleniumhq/side-commons": "4.0.13",
+    "@seleniumhq/side-model": "4.0.13",
+    "@seleniumhq/side-runtime": "4.0.13",
+    "dnd-core": "^16.0.1",
+    "electron-chromedriver": "^28.0.0",
+    "electron-log": "^5.1.0",
     "electron-store": "^8.1.0",
     "electron-unhandled": "^4.0.1",
-    "fs-extra": "^8.1.0",
+    "electron-updater": "^6.1.7",
+    "fs-extra": "^11.1.1",
     "lodash": "4.17.21",
-    "react": "^17.0.2",
-    "react-dnd": "^15.1.1",
-    "react-dnd-html5-backend": "^15.1.2",
-    "react-dom": "^17.0.2",
-    "ua-parser-js": "^0.7.19",
+    "react": "^18.2.0",
+    "react-dnd": "^16.0.1",
+    "react-dnd-html5-backend": "^16.0.1",
+    "react-dom": "^18.2.0",
+    "react-intl": "^6.6.5",
+    "react-resizable-panels": "^1.0.8",
+    "scroll-into-view-if-needed": "^3.0.10",
+    "selenium-webdriver": "^4.25.0",
+    "side-code-export": "^4.0.11",
     "v8-compile-cache": "^2.3.0"
   },
   "devDependencies": {
     "@medv/finder": "^1.1.1",
-    "@seleniumhq/browser-info": "^4.0.0-alpha.1",
+    "@seleniumhq/browser-info": "4.0.13",
     "@types/copy-webpack-plugin": "8.0.1",
-    "@types/electron": "1.6.10",
-    "@types/electron-devtools-installer": "^2.2.2",
-    "@types/fs-extra": "^8.0.0",
-    "@types/lodash": "^4.14.186",
-    "@types/react": "^17.0.14",
-    "@types/react-dom": "^17.0.9",
-    "@types/ua-parser-js": "^0.7.36",
+    "@types/electron-devtools-installer": "^2.2.5",
+    "@types/fs-extra": "^11.0.1",
+    "@types/lodash": "^4.14.199",
+    "@types/react": "^18.2.15",
+    "@types/react-dom": "^18.2.7",
+    "@types/selenium-webdriver": "^4.1.26",
     "@types/webpack-env": "^1.16.0",
     "copy-webpack-plugin": "^10.2.4",
-    "css-loader": "^6.1.0",
-    "electron": "^18.3.14",
-    "electron-builder": "^23.5.1",
+    "css-loader": "^6.8.1",
+    "electron": "^28.2.0",
+    "electron-builder": "^24.9.1",
     "electron-devtools-installer": "^3.2.0",
-    "fork-ts-checker-webpack-plugin": "7.2.1",
-    "html-webpack-plugin": "^5.3.2",
+    "fork-ts-checker-webpack-plugin": "^8.0.0",
+    "html-webpack-plugin": "^5.5.3",
+    "mini-css-extract-plugin": "^2.7.6",
     "npm-run-all": "^4.1.5",
-    "run-script-os": "1.1.6",
-    "scroll-into-view-if-needed": "^2.2.20",
-    "source-map-loader": "3.0.1",
-    "source-map-support": "0.5.21",
-    "style-loader": "^3.1.0",
-    "ts-loader": "^9.2.3",
-    "ts-node": "^10.7.0",
-    "typescript": "^4.5.4",
-    "ua-parser-js": "^0.7.19",
-    "url-loader": "^4.1.1",
-    "webpack": "^5.70.0",
-    "webpack-cli": "^4.9.2"
+    "run-script-os": "^1.1.6",
+    "source-map-loader": "^4.0.1",
+    "source-map-support": "^0.5.21",
+    "style-loader": "^3.3.3",
+    "ts-loader": "^9.5.0",
+    "ts-node": "^10.9.1",
+    "typescript": "^5.2.2",
+    "webpack": "^5.89.0",
+    "webpack-cli": "^5.1.4",
+    "webpack-dev-server": "^5.0.4"
   }
 }

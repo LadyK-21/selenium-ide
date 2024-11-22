@@ -38,22 +38,19 @@
       "path": "./packages/side-api"
     },
     {
-      "path": "./packages/side-cli"
-    },
-    {
       "path": "./packages/side-code-export"
     },
     {
       "path": "./packages/side-commons"
     },
     {
+      "path": "./packages/side-example-suite"
+    },
+    {
       "path": "./packages/side-migrate"
     },
     {
       "path": "./packages/side-model"
-    },
-    {
-      "path": "./packages/side-plugin-example"
     },
     {
       "path": "./packages/side-runner"
@@ -63,6 +60,9 @@
     },
     {
       "path": "./packages/side-testkit"
+    },
+    {
+      "path": "./packages/side-test-metaparser"
     },
     {
       "path": "./packages/webdriver-testkit"

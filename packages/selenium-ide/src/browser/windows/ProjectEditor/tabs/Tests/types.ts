@@ -4,6 +4,7 @@ import { CoreSessionData, LocatorFields } from '@seleniumhq/side-api'
 export interface CommandEditorProps {
   command: CommandShape
   commands: CoreSessionData['state']['commands']
+  disabled?: boolean
   testID: string
 }
 
@@ -16,7 +17,8 @@ export interface CommandArgFieldProps extends CommandEditorProps {
 }
 
 export interface CommandFieldProps extends CommandEditorProps {
-  fieldName: 'comment' | LocatorFields
+  fieldName: 'comment' | 'windowHandleName' | 'windowTimeout' | LocatorFields
+  note?: string
 }
 
 export interface MiniCommandShape {

@@ -17,19 +17,19 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { spawn } from 'child_process'
+import { Command } from 'commander'
+import crypto from 'crypto'
+import fs from 'fs'
 import merge from 'lodash/fp/merge'
 import os from 'os'
 import path from 'path'
-import crypto from 'crypto'
+import resolveBin from 'resolve-bin'
 import util from 'util'
-import { Command } from 'commander'
 import Capabilities from './capabilities'
 import Config from './config'
 import ParseProxy from './proxy'
 import { Configuration, SideRunnerAPI } from './types'
-import { spawn } from 'child_process'
-
-const isWindows = os.platform() === 'win32'
 
 const metadata = require('../package.json')
 
@@ -52,6 +52,12 @@ program
   )
   .option('-s, --server [url]', 'Webdriver remote server')
   .option(
+    '-r, --retries [number]',
+    'Retry tests N times on failures, thin wrapper on jest.retryTimes',
+    (str) => parseInt(str),
+    0
+  )
+  .option(
     '-f, --filter [string]',
     'Run suites matching name, takes a regex without slashes, eg (^(hello|goodbye).*$)'
   )
@@ -67,6 +73,12 @@ program
     DEFAULT_TIMEOUT
   )
   .option(
+    '-T, --jest-timeout [number]',
+    `The maximimum amount of time, in milliseconds, to wait for a test to finish. (default: 60000)`,
+    (str) => parseInt(str),
+    60000
+  )
+  .option(
     '-x, --proxy-type [type]',
     'Type of proxy to use (one of: direct, manual, pac, socks, system)'
   )
@@ -79,8 +91,12 @@ program
     'Use specified YAML file for configuration. (default: .side.yml)'
   )
   .option(
-    '-o, --output-directory [it directory]',
+    '-o, --output-directory [directory]',
     'Write test results as json to file in specified directory. Name will be based on timestamp.'
+  )
+  .option(
+    '-z, --screenshot-failure-directory [directory]',
+    'Write screenshots of failed tests to file in specified directory. Name will be based on test + timestamp.'
   )
   .option(
     '-f, --force',
@@ -88,6 +104,7 @@ program
   )
   .option('-d, --debug', 'Print debug logs')
   .option('-D, --debug-startup', 'Print debug startup logs')
+  .option('-X, --debug-connection-mode', 'Debug driver connection mode')
 
 program.parse()
 
@@ -97,23 +114,28 @@ if (!program.args.length) {
   process.exit(1)
 }
 const options = program.opts()
+
 let configuration: Configuration = {
   baseUrl: '',
   capabilities: {
     browserName: 'chrome',
   },
   debug: options.debug,
+  debugConnectionMode: options.debugConnectionMode,
   debugStartup: options.debugStartup,
   filter: options.filter || '.*',
   force: options.force,
   maxWorkers: os.cpus().length,
+  screenshotFailureDirectory: options.screenshotFailureDirectory,
   // Convert all project paths into absolute paths
   projects: [],
   proxyOptions: {},
   proxyType: undefined,
+  retries: options.retries,
   runId: crypto.randomBytes(16).toString('hex'),
   path: path.join(__dirname, '../../'),
   server: '',
+  jestTimeout: options.jestTimeout,
   timeout: DEFAULT_TIMEOUT,
 }
 
@@ -156,35 +178,42 @@ if (configuration.proxyType) {
   configuration.capabilities.proxy = proxy
 }
 
+const outputFilename =
+  'results-' + new Date().toISOString().replace(/:/g, '-') + '.json'
+if (options.outputDirectory) {
+  if (!fs.existsSync(options.outputDirectory)) {
+    fs.mkdirSync(options.outputDirectory, { recursive: true })
+  }
+  const outputFile = path.join(options.outputDirectory, outputFilename)
+  if (!fs.existsSync(outputFile)) {
+    fs.writeFileSync(outputFile, '')
+  }
+}
+
+if (options.screenshotFailureDirectory) {
+  if (!fs.existsSync(options.screenshotFailureDirectory)) {
+    fs.mkdirSync(options.screenshotFailureDirectory, { recursive: true })
+  }
+}
+
 configuration.debugStartup &&
   console.debug('Configuration:', util.inspect(configuration))
 
 // All the stuff that goes into a big wrapped jest command
-const jestExecutable = isWindows ? 'jest.cmd' : 'jest'
-const jestCommand = path.join(
-  __dirname,
-  '..',
-  'node_modules',
-  '.bin',
-  jestExecutable
-)
+const jest = 'node ' + resolveBin.sync('jest')
 const jestArgs = [
-  '--config=' + path.join(__dirname, '..', 'jest.config.js'),
+  '--config=' + path.join(__dirname, '..', 'runner.jest.config.js'),
   '--maxConcurrency=' + configuration.maxWorkers,
 ]
   .concat(
     options.outputDirectory
       ? [
           '--json',
-          '--outputFile=' +
-            path.join(
-              options.outputDirectory,
-              'results-' + new Date().toISOString() + '.json'
-            ),
+          '--outputFile=' + path.join(options.outputDirectory, outputFilename),
         ]
       : []
   )
-  .concat(options.jestOptions.slice(1, -1).split(' '))
+  .concat(options.jestOptions.slice(1, -1).split(' ').filter(Boolean))
   .concat(['--runTestsByPath', path.join(__dirname, 'main.test.js')])
 
 const jestEnv = {
@@ -193,8 +222,9 @@ const jestEnv = {
 }
 
 configuration.debugStartup &&
-  console.debug('Jest command:', jestCommand, jestArgs, jestEnv)
-spawn(jestCommand, jestArgs, {
+  console.debug('Jest command:', jest, jestArgs, jestEnv)
+spawn(jest, jestArgs, {
+  cwd: process.cwd(),
   env: jestEnv,
   shell: true,
   stdio: 'inherit',

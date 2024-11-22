@@ -16,11 +16,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import LocatorBuilders from './locator-builders'
-import Recorder from './recorder'
+import { singleton as locatorBuilders } from './locator-builders'
+import type Recorder from './recorder'
 import { isTest } from './utils'
 
-const locatorBuilders = new LocatorBuilders(window)
 export const handlers: Parameters<Recorder['addEventHandler']>[] = []
 export const observers: Parameters<Recorder['addMutationObserver']>[] = []
 
@@ -91,6 +90,7 @@ handlers.push([
     }
     this.recordingState.typeLock = 0
   },
+  true,
 ])
 
 handlers.push([
@@ -99,6 +99,7 @@ handlers.push([
   function (this: Recorder, event) {
     this.recordingState.typeTarget = (event.target as HTMLElement) || null
   },
+  true,
 ])
 
 // © Jie-Lin You, SideeX Team
@@ -152,7 +153,6 @@ handlers.push([
   function (this: Recorder, _event) {
     const event = _event as KeyboardEvent
     const target = event.target as HTMLInputElement
-
     if (target.tagName) {
       let key = event.keyCode
       let tagName = target.tagName.toLowerCase()

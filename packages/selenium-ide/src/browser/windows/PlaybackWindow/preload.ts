@@ -14,52 +14,67 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import { RecorderPreprocessor } from '@seleniumhq/side-api'
 import api from 'browser/api'
-import apiMutators from 'browser/api/mutator'
-import { contextBridge, ipcRenderer, webFrame } from 'electron'
-import { identity } from 'lodash/fp'
-import path from 'path'
+import preload from 'browser/helpers/preload'
+import { cb as ElectronInit } from 'browser/helpers/preload-electron'
 import Recorder from './preload/recorder'
+import { contextBridge, ipcRenderer, webFrame } from 'electron'
 
-const pluginFromPath = (pluginPath: string) => {
-  const actualPluginPath = __non_webpack_require__.resolve(pluginPath)
-  const preloadPath = path.join(actualPluginPath, '..', 'preload', 'index.js')
-  try {
-    const pluginPreload = __non_webpack_require__(preloadPath)
-    const pluginHandler =
-      typeof pluginPreload === 'function'
-        ? pluginPreload
-        : pluginPreload.default
-    return pluginHandler((...args: any[]) =>
-      ipcRenderer.send(`message-${pluginPath}`, ...args)
-    )
-  } catch (e) {
-    console.error(e)
-    return null
-  }
+// This is a hack to get around the fact that the prompt is not
+// available in the renderer process. This is a temporary solution
+const polyfill = () => {
+  const keys = ['alert', 'confirm', 'prompt']
+  keys.forEach((key) => {
+    contextBridge.exposeInMainWorld(key + '-polyfill', (...args: any[]) => {
+      const result = ipcRenderer.sendSync(key + '-polyfill', ...args)
+      return result
+    })
+    webFrame.executeJavaScript(`window.${key} = window['${key}-polyfill'];`)
+  })
 }
 
-/**
- * Expose it in the main context
- */
-window.addEventListener('DOMContentLoaded', async () => {
-  contextBridge.exposeInMainWorld('sideAPI', true)
-  webFrame.executeJavaScript(`
-    Object.defineProperty(navigator, 'webdriver', {
-      get () {
-        return true
-      } 
-    })
-  `)
-  window.sideAPI = {
+const recorderProcessors: RecorderPreprocessor[] = []
+function injectRecorder() {
+  return new Promise<void>((resolve) => {
+    const isLoading = document.readyState === 'loading'
+    const handler = async () => {
+      polyfill()
+      setTimeout(async () => {
+        console.debug('Initializing the recorder')
+        const recorder = new Recorder(window, recorderProcessors)
+        recorder.attach()
+        resolve()
+      }, 500)
+    }
+    if (isLoading) {
+      window.addEventListener('DOMContentLoaded', handler)
+    } else {
+      handler()
+    }
+  })
+}
+
+preload(
+  {
+    channels: api.channels,
+    menus: {
+      openSync: () => api.menus.openSync('playback'),
+    },
+    plugins: {
+      addRecorderPreprocessor: (fn) => {
+        recorderProcessors.push(fn)
+      },
+      getPreloads: api.plugins.getPreloads,
+    },
     recorder: api.recorder,
-    // @ts-expect-error
-    mutators: { recorder: apiMutators.recorder },
-  }
-  const pluginPaths = await api.plugins.list()
-  const plugins = pluginPaths.map(pluginFromPath).filter(identity)
-  setTimeout(async () => {
-    console.debug('Initializing the recorder')
-    new Recorder(window, plugins)
-  }, 500)
-})
+  },
+  ElectronInit(true),
+  injectRecorder
+)
+
+// document.addEventListener('mouseleave', () => {
+//   if (document.activeElement === document.body) {
+//     api.windows.shiftFocus('editor')
+//   }
+// })

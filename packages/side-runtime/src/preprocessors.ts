@@ -17,6 +17,7 @@
 
 import { Fn } from '@seleniumhq/side-commons'
 import Variables from './variables'
+import type WebDriverExecutor from './webdriver'
 
 const nbsp = String.fromCharCode(160)
 
@@ -26,45 +27,53 @@ const nbsp = String.fromCharCode(160)
 // have this in scope as well as grant the preprocessor access to the variables
 export function composePreprocessors(...args: any[]) {
   const func = args[args.length - 1]
-  const params = args.slice(0, args.length - 1)
+  const params = args.slice(0, -1)
   if (params.length === 0) {
     return func
   } else if (params.length === 1) {
-    return function preprocess(target: any) {
-      // @ts-expect-error
-      return func.call(this, runPreprocessor(params[0], target, this.variables))
+    return function preprocess(
+      this: WebDriverExecutor,
+      target: any,
+      ...args: any[]
+    ) {
+      return func.call(
+        this,
+        runPreprocessor(params[0], target, this.variables),
+        ...args
+      )
     }
   } else if (params.length === 2) {
-    return function preprocess(target: any, value: any) {
+    return function preprocess(
+      this: WebDriverExecutor,
+      target: any,
+      value: any,
+      ...args: any[]
+    ) {
       return func.call(
-        // @ts-expect-error
         this,
-        // @ts-expect-error
         runPreprocessor(params[0], target, this.variables),
-        // @ts-expect-error
-        runPreprocessor(params[1], value, this.variables)
+        runPreprocessor(params[1], value, this.variables),
+        ...args
       )
     }
   } else {
-    return function preprocess(target: any, value: any, options: any) {
+    return function preprocess(
+      this: WebDriverExecutor,
+      target: any,
+      value: any,
+      options: any
+    ) {
       if (!options) {
         return func.call(
-          // @ts-expect-error
           this,
-          // @ts-expect-error
           runPreprocessor(params[0], target, this.variables),
-          // @ts-expect-error
           runPreprocessor(params[1], value, this.variables)
         )
       }
       return func.call(
-        // @ts-expect-error
         this,
-        // @ts-expect-error
         runPreprocessor(params[0], target, this.variables),
-        // @ts-expect-error
         runPreprocessor(params[1], value, this.variables),
-        // @ts-expect-error
         preprocessObject(params[2], options, this.variables)
       )
     }
@@ -97,12 +106,19 @@ function preprocessObject(
 export type Interpolator = (value: string, variables: Variables) => string
 
 export function preprocessArray(interpolator: Interpolator) {
-  return function preprocessArray(items: string[], variables: Variables) {
-    return items.map((item) => [interpolator(item[0], variables), item[1]])
+  return function preprocessArray(
+    items: [string, string][],
+    variables: Variables
+  ) {
+    return items.map((item) => [
+      interpolator(item[0], variables),
+      interpolator(item[1], variables),
+    ])
   }
 }
 
 export function interpolateString(value: string, variables: Variables) {
+  if (!value) return ''
   value = value.replace(/^\s+/, '')
   value = value.replace(/\s+$/, '')
   let r2

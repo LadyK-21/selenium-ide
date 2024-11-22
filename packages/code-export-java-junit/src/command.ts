@@ -15,14 +15,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
+// eslint-disable-next-line node/no-unpublished-import
 import { CommandShape } from '@seleniumhq/side-model'
 import {
+  EmitterContext,
   codeExport as exporter,
   ExportFlexCommandShape,
   PrebuildEmitter,
   ProcessedCommandEmitter,
   ScriptShape,
-} from '@seleniumhq/side-code-export'
+} from 'side-code-export'
 import location from './location'
 import selection from './selection'
 
@@ -134,8 +136,9 @@ function register(command: string, emitter: PrebuildEmitter) {
   exporter.register.emitter({ command, emitter, emitters })
 }
 
-function emit(command: CommandShape) {
+function emit(command: CommandShape, context: EmitterContext) {
   return exporter.emit.command(command, emitters[command.command], {
+    context,
     variableLookup,
     emitNewWindowHandling,
   })
@@ -496,11 +499,10 @@ async function emitMouseUp(locator: string) {
   return Promise.resolve({ commands })
 }
 
-function emitOpen(target: string) {
+function emitOpen(target: string, _value: null, context: EmitterContext) {
   const url = /^(file|http|https):\/\//.test(target)
     ? `"${target}"`
-    : // @ts-expect-error globals yuck
-    `"${global.baseUrl}${target}"`
+    : `"${context.project.url}${target}"`
   return Promise.resolve(`driver.get(${url});`)
 }
 

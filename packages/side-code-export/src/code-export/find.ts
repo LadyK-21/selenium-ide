@@ -29,8 +29,10 @@ export function deduplicateReusedTestMethods(testMethods: TestShape[]) {
 
 export function findCommandThatOpensWindow(
   test: TestShape,
-  tests: TestShape[]
+  tests: TestShape[],
+  searchedTests: TestShape[] = []
 ): CommandShape | null {
+  searchedTests.push(test)
   for (const command of test.commands) {
     if (command.opensWindow) {
       return command
@@ -38,28 +40,42 @@ export function findCommandThatOpensWindow(
     if (command.command === 'run') {
       const nestedTests = findReusedTestMethods(test, tests)
       for (const nestedTest in nestedTests) {
-        return findCommandThatOpensWindow(nestedTests[nestedTest], nestedTests)
+        if (searchedTests.indexOf(nestedTests[nestedTest]) !== -1) {
+          continue
+        }
+        const cmd = findCommandThatOpensWindow(
+          nestedTests[nestedTest],
+          tests,
+          searchedTests
+        )
+        if (cmd) {
+          return cmd
+        }
       }
     }
   }
   return null
 }
 
-export function findReusedTestMethods(test: TestShape, tests: TestShape[]) {
-  let results: TestShape[] = []
+export function findReusedTestMethods(
+  test: TestShape,
+  tests: TestShape[],
+  results: TestShape[] = []
+) {
   for (const command of test.commands) {
     if (command.command === 'run') {
       const reusedTest = tests.find((test) => test.name === command.target)
-      if (!reusedTest) {
+      const newTests = tests.filter((test) => results.indexOf(test) === -1)
+      if (reusedTest && results.indexOf(reusedTest) === -1) {
+        results.push(reusedTest)
+        findReusedTestMethods(reusedTest, newTests, results)
+      } else {
         console.log(
           'Encountered a dynamic test declaration, including all tests as methods - will bloat code'
         )
-        results = results.concat(tests)
-      } else {
-        results.push(test)
-        results = results.concat(findReusedTestMethods(reusedTest, tests))
+        results.push(...newTests)
       }
     }
   }
-  return deduplicateReusedTestMethods(results)
+  return results
 }

@@ -1,18 +1,19 @@
 import { ipcRenderer } from 'electron'
-import { ApiPromiseHandler, DefaultRouteShape, ThenArg } from '@seleniumhq/side-api'
+import {
+  ApiPromiseHandler,
+  DefaultRouteShape,
+  ThenArg,
+} from '@seleniumhq/side-api'
 
-const doAPI = <HANDLER extends ApiPromiseHandler>(
+const doAPI = async <HANDLER extends ApiPromiseHandler>(
   path: string,
   ...args: Parameters<HANDLER>
-): Promise<ThenArg<ReturnType<HANDLER>>> =>
-  new Promise<ThenArg<ReturnType<HANDLER>>>((resolve) => {
-    ipcRenderer.once(`${path}.complete`, (_event, result) => {
-      console.debug('Reply from server', path, 'with results', result)
-      resolve(result as ThenArg<ReturnType<HANDLER>>)
-    })
-    console.debug('Emitting to server', path, 'with args', args)
-    ipcRenderer.send(path, ...args)
-  })
+): Promise<ThenArg<ReturnType<HANDLER>>> => {
+  console.debug('Emitting to server', path, 'with args', args)
+  const result = await ipcRenderer.invoke(path, ...args)
+  console.debug('Reply from server', path, 'with results', result)
+  return result as ThenArg<ReturnType<HANDLER>>
+}
 
 const Handler =
   <HANDLER extends ApiPromiseHandler = DefaultRouteShape>() =>

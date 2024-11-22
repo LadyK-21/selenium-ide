@@ -1,31 +1,57 @@
 import { ipcMain, WebContents } from 'electron'
-import { BaseListener, EventMutator, ListenerFn, VariadicArgs } from '@seleniumhq/side-api'
+import {
+  BaseListener,
+  EventMutator,
+  ListenerFn,
+  VariadicArgs,
+} from '@seleniumhq/side-api'
 import { Session } from 'main/types'
 import getCore from '../helpers/getCore'
-import { COLOR_CYAN, vdebuglog } from 'main/util'
 
-const apiDebugLog = vdebuglog('api', COLOR_CYAN)
+export type MainListener<
+  ARGS extends VariadicArgs,
+  RESULT extends any
+> = BaseListener<ARGS, RESULT> & {
+  dispatchEventAsync: (...args: ARGS) => Promise<RESULT[][]>
+}
 
-const baseListener = <ARGS extends VariadicArgs>(
+const baseListener = <ARGS extends VariadicArgs, RESULT extends any>(
   path: string,
   session: Session,
   mutator?: EventMutator<ARGS>
-): BaseListener<ARGS> => {
+): MainListener<ARGS, RESULT> => {
   const listeners: any[] = []
   return {
     addListener(listener) {
-      apiDebugLog('Listener added', path)
+      session.system.loggers.api('Listener added', path)
       listeners.push(listener)
     },
-    dispatchEvent(...args) {
-      apiDebugLog('Dispatch event', path, args)
+    async dispatchEvent(...args) {
+      if (path !== 'system.onLog') {
+        session.system.loggers.api('Dispatch event', path, args)
+      }
       if (mutator) {
+        session.api.state.onMutate.dispatchEvent(path, args)
         const newState = mutator(getCore(session), args)
         session.projects.project = newState.project
         session.state.state = newState.state
-        session.api.state.onMutate.dispatchEvent(path, args)
       }
-      listeners.forEach((fn) => fn(...args))
+      return await Promise.all<RESULT>(listeners.map((fn) => fn(...args)))
+    },
+    async dispatchEventAsync(...args) {
+      if (path !== 'system.onLog') {
+        session.system.loggers.api('Dispatch event async', path, args)
+      }
+      if (mutator) {
+        session.api.state.onMutate.dispatchEvent(path, args)
+        const newState = mutator(getCore(session), args)
+        session.projects.project = newState.project
+        session.state.state = newState.state
+      }
+      const results: RESULT[][] = await Promise.all(
+        listeners.map((fn) => fn(...args))
+      )
+      return results
     },
     hasListener(listener) {
       return listeners.includes(listener)
@@ -36,18 +62,19 @@ const baseListener = <ARGS extends VariadicArgs>(
       if (index === -1) {
         throw new Error(`Unable to remove listener for ${path} ${listener}`)
       }
-      apiDebugLog('Listener removed', path)
+      session.system.loggers.api('Listener removed', path)
       listeners.splice(index, 1)
     },
   }
 }
 
+const responsePaths = ['recorder.onRequestElementAt']
 const wrappedListener = <ARGS extends VariadicArgs>(
   path: string,
   session: Session,
   mutator?: EventMutator<ARGS>
 ) => {
-  const api = baseListener<ARGS>(path, session, mutator)
+  const api = baseListener<ARGS, any>(path, session, mutator)
   const senders: WebContents[] = []
   const senderCounts: number[] = []
   const senderFns: ListenerFn<ARGS>[] = []
@@ -74,14 +101,25 @@ const wrappedListener = <ARGS extends VariadicArgs>(
       senderCounts[index] += 1
       return
     }
-    const senderFn = (...args: ARGS) => {
-      try {
-        sender.send(path, ...args)
-      } catch (e) {
-        // Sender has expired
-        removeListener(event)
-      }
-    }
+    const senderFn = (...args: ARGS): Promise<any> =>
+      new Promise((resolve) => {
+        try {
+          const hasResponse = responsePaths.includes(path)
+          if (hasResponse) {
+            ipcMain.once(`${path}.response`, (_event, results) => {
+              resolve(results)
+            })
+          }
+          sender.send(path, ...args)
+          if (!hasResponse) {
+            resolve(null)
+          }
+        } catch (e) {
+          console.error(e)
+          // Sender has expired
+          removeListener(event)
+        }
+      })
     api.addListener(senderFn)
     senders.push(sender)
     senderCounts.push(1)

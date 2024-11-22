@@ -1,35 +1,38 @@
+import Box from '@mui/material/Box'
 import Paper from '@mui/material/Paper'
-import { CoreSessionData } from '@seleniumhq/side-api'
-import React, { FC } from 'react'
-import MainHeader from '../../components/Main/Header'
+import { SIDEMainProps } from 'browser/components/types'
+import React, { FC, useContext } from 'react'
+import OutPutSettings from './OutPutSettings'
 import ProjectSettings from './ProjectSettings'
 import SystemSettings from './SystemSettings'
-
-export interface ProjectTabProps {
-  session: CoreSessionData
-}
+import SettingsTabs from './SettingTabs'
+import { context as showDrawerContext } from 'browser/contexts/show-drawer'
+import { context } from 'browser/contexts/config-settings-group'
 
 export interface MiniProjectShape {
   id: string
   name: string
 }
 
-const SettingsWrapper: FC<ProjectTabProps> = ({
-  session: { project, state },
-}) =>
-  state.editor.configSettingsGroup === 'project' ? (
-    <ProjectSettings project={project} />
-  ) : (
-    <SystemSettings state={state} />
-  )
+const SettingsWrapper: FC = () => {
+  const configSettingsGroup = useContext(context)
+  switch (configSettingsGroup) {
+    case 'outPut':
+      return <OutPutSettings />
+    case 'project':
+      return <ProjectSettings />
+    case 'system':
+      return <SystemSettings />
+  }
+}
 
-const ProjectTab: FC<ProjectTabProps> = ({ session }) => (
-  <>
-    <MainHeader />
+const ProjectTab: React.FC<Pick<SIDEMainProps, 'setTab' | 'tab'>> = () => (
+  <Box className="fill flex flex-col">
+    {!useContext(showDrawerContext) && <SettingsTabs />}
     <Paper elevation={1} id="project-editor" square>
-      <SettingsWrapper session={session} />
+      <SettingsWrapper />
     </Paper>
-  </>
+  </Box>
 )
 
 export default ProjectTab

@@ -61,6 +61,7 @@ interface CommandRowProps {
   activeTest: string
   commandState: PlaybackEventShapes['COMMAND_STATE_CHANGED']
   command: CommandShape
+  disabled?: boolean
   index: number
   reorderPreview: ReorderPreview
   resetPreview: () => void
@@ -79,8 +80,9 @@ const updateIsBreakpoint = (
 
 const CommandRow: React.FC<CommandRowProps> = ({
   activeTest,
-  commandState = {},
+  commandState,
   command: { command, comment, id, isBreakpoint, target, value },
+  disabled = false,
   index,
   reorderPreview,
   resetPreview,
@@ -89,14 +91,18 @@ const CommandRow: React.FC<CommandRowProps> = ({
   if (typeof command != 'string') {
     command = '//unknown - could not process'
   }
+  const state = commandState?.state ?? null
   const toggleBreakpoint = () =>
     updateIsBreakpoint(activeTest, id, !isBreakpoint)
-  if (commandState.state === 'executing') {
+  if (state === 'executing') {
     window.scrollTo(0, 20 * index)
   }
   const isDisabled = command.startsWith('//')
   const commandText = isDisabled ? command.slice(2) : command
-  const mainClass = ['pos-rel'].concat(isDisabled ? ['o-50'] : []).join(' ')
+  const mainClass = ['pos-rel width-100']
+    .concat(isDisabled ? ['o-50'] : [])
+    .join(' ')
+  const message = commandState?.message ?? ''
   return (
     <ReorderableListItem
       className={mainClass}
@@ -109,6 +115,8 @@ const CommandRow: React.FC<CommandRowProps> = ({
         },
       }}
       divider
+      data-command={commandText}
+      data-command-id={id}
       dragType="COMMAND"
       id={id}
       index={index}
@@ -133,14 +141,12 @@ const CommandRow: React.FC<CommandRowProps> = ({
       secondaryAction={
         <IconButton
           color={isBreakpoint ? 'warning' : 'default'}
+          disabled={disabled}
           onClick={toggleBreakpoint}
         >
           <PauseIcon />
         </IconButton>
       }
-      sx={{
-        width: '100%',
-      }}
     >
       {comment && (
         <Box
@@ -165,38 +171,62 @@ const CommandRow: React.FC<CommandRowProps> = ({
         </Box>
       )}
       <Box
+        className="flex flex-row"
         sx={{
-          display: 'flex',
-          flexDirection: 'row',
           paddingTop: comment ? 0 : 0.5,
-          paddingBottom: commandState.message ? 0 : 0.5,
+          paddingBottom: message ? 0 : 0.5,
           textAlign: 'flex-start',
           width: 'inherit',
         }}
       >
         <Box
+          className="flex-initial"
           sx={{
-            flex: 0,
             flexBasis: 50,
-            textAlign: 'center',
+            justifyContent: 'center',
             ...commandIndexTextFormat,
           }}
         >
-          {index + 1}
+          <Typography variant="subtitle1">{index + 1}</Typography>
         </Box>
-        <Box sx={{ paddingLeft: 1, flex: 1, ...commandTextFormat }}>
-          {camelToTitleCase(commandText)} {isDisabled ? '[Disabled]' : ''}
+        <Box className="flex flex-1 no-overflow-x">
+          <Box
+            className="flex flex-col"
+            sx={{ justifyContent: 'center', ...commandTextFormat }}
+          >
+            <Typography textOverflow="ellipsis" variant="body1">
+              {camelToTitleCase(commandText)} {isDisabled ? '[Disabled]' : ''}
+            </Typography>
+          </Box>
         </Box>
-        <Box sx={{ flex: 2, ...argTextFormat }}>{target}</Box>
-        <Box sx={{ flex: 2, ...argTextFormat }}>{value}</Box>
-        <Box sx={{ flex: 0, flexBasis: 50 }}></Box>
+        <Box className="flex no-overflow-x" sx={{ flex: '2 2 1px' }}>
+          <Box
+            className="flex flex-col"
+            sx={{ justifyContent: 'center', ...argTextFormat }}
+          >
+            <Typography textOverflow="ellipsis" variant="body1">
+              {target}
+            </Typography>
+          </Box>
+        </Box>
+        <Box className="flex no-overflow-x" sx={{ flex: '2 2 1px' }}>
+          <Box
+            className="flex flex-col"
+            sx={{ justifyContent: 'center', ...argTextFormat }}
+          >
+            <Typography textOverflow="ellipsis" variant="body1">
+              {value}
+            </Typography>
+          </Box>
+        </Box>
+        <Box className="flex" sx={{ flex: 0, flexBasis: 74 }}></Box>
       </Box>
-      {commandState.message && (
+      {message && (
         <Box sx={errorTextFormat}>
-          <Typography>{commandState.message}</Typography>
+          <Typography>{message}</Typography>
         </Box>
       )}
-      <CommandOverlay state={commandState.state ?? null} />
+      <CommandOverlay state={state} />
       <Box />
     </ReorderableListItem>
   )

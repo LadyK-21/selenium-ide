@@ -1,6 +1,7 @@
 {
   "folders": [
     { "path": "../", "name": "root" },
+    { "path": "../packages/browser-info" },
     { "path": "../packages/code-export-csharp-commons" },
     { "path": "../packages/code-export-csharp-nunit" },
     { "path": "../packages/code-export-csharp-xunit" },
@@ -14,9 +15,9 @@
     { "path": "../packages/side-cli" },
     { "path": "../packages/side-code-export" },
     { "path": "../packages/side-commons" },
+    { "path": "../packages/side-example-suite" },
     { "path": "../packages/side-migrate" },
     { "path": "../packages/side-model" },
-    { "path": "../packages/side-plugin-example" },
     { "path": "../packages/side-runner" },
     { "path": "../packages/side-runtime" },
     { "path": "../packages/side-testkit" },

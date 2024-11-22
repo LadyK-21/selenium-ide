@@ -100,7 +100,10 @@ export default class Playback {
     this[EE] = new EventEmitter()
     this[EE].emitCommandStateChange = (payload) => {
       this[state].lastSentCommandState = payload
-      this[EE].emit(PlaybackEvents.COMMAND_STATE_CHANGED, payload)
+      this[EE].emit(PlaybackEvents.COMMAND_STATE_CHANGED, {
+        ...payload,
+        testID: this[state].testID,
+      })
     }
     this[EE].emitControlFlowChange = (payload) => {
       this[EE].emit(PlaybackEvents.CONTROL_FLOW_CHANGED, payload)
@@ -129,6 +132,7 @@ export default class Playback {
     steps?: number
     stepPromise?: VaguePromiseWrapper
     stopping: boolean
+    testID?: string
   };
   [EE]: ExtendedEventEmitter
   initialized?: boolean
@@ -149,6 +153,7 @@ export default class Playback {
     test: TestShape,
     { pauseImmediately, startingCommandIndex }: PlayOptions = {}
   ) {
+    this[state].testID = test.id
     await this._prepareToPlay()
     this.commands = test.commands
     this.playbackTree = createPlaybackTree(test.commands, {
@@ -176,6 +181,7 @@ export default class Playback {
     } else if (startIndex && !test.commands[startIndex]) {
       throw new Error('Command to start from not found in test')
     } else {
+      this[state].testID = test.id
       const playToPromise = new Promise((res, rej) => {
         this[state].playTo = {
           command: test.commands[stopIndex].id,
@@ -193,6 +199,7 @@ export default class Playback {
   }
 
   async playFrom(test: TestShape, commandToStart: CommandShape) {
+    this[state].testID = test.id
     const index = test.commands.indexOf(commandToStart)
     if (index === -1) {
       throw new Error('Command not found in test')
@@ -235,9 +242,8 @@ export default class Playback {
         },
       })
       this[state].callstack = callstack
-      await (
-        await this._play()
-      )()
+      const running = await this._play()
+      await running()
     }
   }
 
@@ -255,17 +261,6 @@ export default class Playback {
     } else {
       throw new Error("Can't step through a test that isn't paused")
     }
-  }
-
-  async pause({ graceful } = { graceful: false }) {
-    this[state].pausing = true
-    if (!graceful) {
-      await this.executor.cancel()
-    }
-    this[state].isPlaying = false
-    await new Promise((res) => {
-      this[state].pausingResolve = res
-    })
   }
 
   resume() {
@@ -287,7 +282,7 @@ export default class Playback {
 
     // play will throw but the user will catch it with this.play()
     // this.stop() should resolve once play finishes
-    await (this[state].playPromise as RunningPromise).catch(() => {})
+    await this[state].playPromise
   }
 
   async abort() {
@@ -302,22 +297,27 @@ export default class Playback {
     // we kill regardless of wether the test is paused to keep the
     // behavior consistent
 
-    // @ts-expect-error
-    await this.executor.kill()
+    await this.executor.cancel()
 
     // play will throw but the user will catch it with this.play()
     // this.abort() should resolve once play finishes
-    await (this[state].playPromise as RunningPromise).catch(() => {})
+    try {
+      await this[state].playPromise
+    } catch (err) {
+      // ignore
+    }
   }
 
-  async cleanup() {
+  async cleanup(persistSession = false) {
+    // await this.abort()
     this[EE].removeAllListeners()
-    await this.executor.cleanup()
+    await this.executor.cleanup(persistSession)
   }
 
   async _prepareToPlay() {
     this[EE].emit(PlaybackEvents.PLAYBACK_STATE_CHANGED, {
       state: PlaybackStates.PREPARATION,
+      testID: this[state].testID,
     })
   }
 
@@ -337,6 +337,7 @@ export default class Playback {
   async _play() {
     this[EE].emit(PlaybackEvents.PLAYBACK_STATE_CHANGED, {
       state: PlaybackStates.PLAYING,
+      testID: this[state].testID,
     })
 
     let finishWasCalled = false
@@ -365,6 +366,7 @@ export default class Playback {
       r()
       this[EE].emit(PlaybackEvents.PLAYBACK_STATE_CHANGED, {
         state: PlaybackStates.PLAYING,
+        testID: this[state].testID,
       })
     }
   }
@@ -376,7 +378,7 @@ export default class Playback {
   ): Promise<void> {
     if (
       !this.currentExecutingNode &&
-      (this[state].callstack as Callstack).length > 1
+      (this[state]?.callstack?.length ?? 0) > 1
     ) {
       this._unwind()
     }
@@ -388,7 +390,6 @@ export default class Playback {
         callstackIndex,
         command,
         state: CommandStates.EXECUTING,
-        message: undefined,
       })
 
       const steps = this[state].steps
@@ -444,6 +445,7 @@ export default class Playback {
             command,
             state: CommandStates.FAILED,
             message: err.message,
+            error: err as Error,
           })
           return await this._handleException(() => {
             this._setExitCondition(PlaybackStates.FAILED)
@@ -456,6 +458,7 @@ export default class Playback {
             command,
             state: CommandStates.FAILED,
             message: err.message,
+            error: err as Error,
           })
           return await this._handleException(async () => {
             this._setExitCondition(PlaybackStates.FAILED)
@@ -472,6 +475,7 @@ export default class Playback {
             command,
             state: CommandStates.ERRORED,
             message: (err as Error).message,
+            error: err as Error,
           })
           return await this._handleException(() => {
             this._setExitCondition(PlaybackStates.ERRORED)
@@ -490,7 +494,6 @@ export default class Playback {
 
       return await this._executionLoop()
     }
-    throw new Error('Uh oh, why am I here?!?')
   }
 
   async _playSingleCommand(command: CommandShape) {
@@ -517,6 +520,7 @@ export default class Playback {
           command,
           state: CommandStates.FAILED,
           message: err.message,
+          error: err as Error,
         })
       } else {
         this[EE].emitCommandStateChange({
@@ -525,6 +529,7 @@ export default class Playback {
           command,
           state: CommandStates.ERRORED,
           message: (err as Error).message,
+          error: err as Error,
         })
       }
       throw err
@@ -602,11 +607,11 @@ export default class Playback {
         id,
         callstackIndex,
         command: this[state].lastSentCommandState.command,
-        state: CommandStates.ERRORED,
+        error: new Error('Playback stopped'),
         message: 'Playback stopped',
+        state: CommandStates.ERRORED,
       })
     }
-    this[state].lastSentCommandState = undefined
     const { playTo, steps, stepPromise } = this[state]
     if (stepPromise) {
       if (steps === 0) {
@@ -624,22 +629,34 @@ export default class Playback {
         )
       )
     }
-    this[state].callstack = undefined
+
     this[EE].emit(PlaybackEvents.PLAYBACK_STATE_CHANGED, {
       state: this[state].exitCondition || PlaybackStates.FINISHED,
+      testID: this[state].testID,
+    })
+    this[state].lastSentCommandState = undefined
+    this[state].callstack = undefined
+    this[state].testID = undefined
+  }
+
+  async pause({ graceful } = { graceful: false }) {
+    if (!this.currentExecutingNode) {
+      return
+    }
+    this[state].pausing = true
+    if (!graceful) {
+      await this.executor.cancel()
+    }
+    this[state].isPlaying = false
+    await new Promise((res) => {
+      this[state].pausingResolve = res
     })
   }
 
   async _pause() {
     this[EE].emit(PlaybackEvents.PLAYBACK_STATE_CHANGED, {
       state: PlaybackStates.PAUSED,
-    })
-    await this.__pause()
-  }
-
-  async _break() {
-    this[EE].emit(PlaybackEvents.PLAYBACK_STATE_CHANGED, {
-      state: PlaybackStates.BREAKPOINT,
+      testID: this[state].testID,
     })
     await this.__pause()
   }
@@ -661,9 +678,17 @@ export default class Playback {
       playTo.res()
     }
 
-    await new Promise((res) => {
+    return new Promise((res) => {
       this[state].resumeResolve = res
     })
+  }
+
+  async _break() {
+    this[EE].emit(PlaybackEvents.PLAYBACK_STATE_CHANGED, {
+      state: PlaybackStates.BREAKPOINT,
+      testID: this[state].testID,
+    })
+    await this.__pause()
   }
 
   async _handleException(unhandledBahaviorFn: Fn) {
@@ -676,7 +701,7 @@ export default class Playback {
   }
 
   async _delay(): Promise<void> {
-    if (this.options.delay)
+    if (this.options.delay) {
       return new Promise((res, rej) => {
         const start = Date.now()
         const interval = setInterval(() => {
@@ -695,6 +720,10 @@ export default class Playback {
           }
         }, DELAY_INTERVAL)
       })
+    }
+    if (this[state].pausing || this[state].stopping || this[state].aborting) {
+      throw new Error('delay cancelled due to playback being stopped/paused')
+    }
   }
 
   _unwind() {
@@ -728,13 +757,16 @@ export default class Playback {
 export interface PlaybackEventShapes {
   COMMAND_STATE_CHANGED: {
     id: string
+    testID?: string
     callstackIndex?: number
     command: CommandShape
     state: typeof CommandStates[keyof typeof CommandStates]
     message?: string
+    error?: Error
   }
   PLAYBACK_STATE_CHANGED: {
     state: typeof PlaybackStates[keyof typeof PlaybackStates]
+    testID?: string
   }
   CALL_STACK_CHANGED: {
     change: typeof CallstackChange[keyof typeof CallstackChange]

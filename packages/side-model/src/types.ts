@@ -8,6 +8,7 @@ export interface CommandShape {
   command: string
   target?: string
   targets?: [string, string][]
+  fallbackTargets?: [string, string][]
   targetFallback?: [string, string][]
   value?: string
   values?: [string, string][]
@@ -53,10 +54,11 @@ export interface TestShape {
 
 export interface ProjectShape {
   id: string
-  version: '2.0' | '3.0'
+  version: '1.0' | '1.1' | '2.0' | '3.0'
   name: string
   url: string
   urls: string[]
+  timeout?: number
   delay?: number
   plugins: string[]
   tests: TestShape[]

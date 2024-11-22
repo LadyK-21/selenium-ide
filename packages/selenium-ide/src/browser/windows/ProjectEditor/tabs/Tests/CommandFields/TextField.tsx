@@ -1,45 +1,72 @@
 import FormControl from '@mui/material/FormControl'
 import HelpCenter from '@mui/icons-material/HelpCenter'
 import TextField from 'browser/components/UncontrolledTextField'
-import capitalize from 'lodash/fp/capitalize'
+import startCase from 'lodash/fp/startCase'
 import React, { FC } from 'react'
 import { CommandFieldProps } from '../types'
 import { updateField } from './utils'
 import Tooltip from '@mui/material/Tooltip'
+import { LocatorFields } from '@seleniumhq/side-api'
+import { useIntl } from 'react-intl'
+import languageMap from 'browser/I18N/keys'
+
+const inputLabelProps = {
+  sx: {
+    textOverflow: 'ellipsis',
+  },
+}
 
 const CommandTextField: FC<CommandFieldProps> = ({
-  commands,
   command,
+  disabled,
   fieldName,
+  note,
   testID,
 }) => {
-  const FieldName = capitalize(fieldName)
+  const intl = useIntl()
+  const FieldName = startCase(fieldName)
   const updateText = updateField(fieldName)
-  const isComment = fieldName === 'comment'
-  const fullnote = isComment ? '' : commands[command.command][fieldName]?.description ?? ''
-  const label = fullnote ? FieldName + ' - ' + fullnote : FieldName
+  // 处理label标签
+  const handleLabel = (value: string) => {
+    switch (value) {
+      case 'Comment':
+        return intl.formatMessage({ id: languageMap.testCore.comment })
+      case 'Target':
+        return intl.formatMessage({ id: languageMap.testCore.target })
+      case 'Value':
+        return intl.formatMessage({ id: languageMap.testCore.value })
+      default:
+        return value
+    }
+  }
+  // 一定会使用languageMap.commandMap,其实是为了兼容参数commands
+  const fullNote =
+    note ||
+    intl.formatMessage({
+      id: `commandMap.${command.command}.${fieldName}.description`,
+    })
+  const label = fullNote
+    ? handleLabel(FieldName) + ' - ' + fullNote
+    : handleLabel(FieldName)
 
   return (
     <FormControl className="flex flex-row">
       <TextField
         className="flex-1"
+        disabled={disabled}
         id={`${fieldName}-${command.id}`}
         label={label}
-        InputLabelProps={{
-          sx: {
-            textOverflow: 'ellipsis',
-          },
-        }}
+        InputLabelProps={inputLabelProps}
         name={fieldName}
         onChange={updateText(testID, command.id)}
         onContextMenu={() => {
           window.sideAPI.menus.open('textField')
         }}
         size="small"
-        value={command[fieldName]}
+        value={command[fieldName as LocatorFields]}
       />
-      {!isComment && (
-        <Tooltip className="mx-2 my-auto" title={fullnote} placement="top-end">
+      {fullNote && (
+        <Tooltip className="mx-2 my-auto" title={fullNote} placement="top-end">
           <HelpCenter />
         </Tooltip>
       )}

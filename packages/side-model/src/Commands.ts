@@ -24,11 +24,7 @@ export interface CommandType {
   value?: ArgType
 }
 
-export interface CommandTypes {
-  [key: string]: CommandType
-}
-
-export default {
+const commands = {
   acceptAlert: {
     name: 'accept alert',
     description: `Affects a currently showing alert. This 
@@ -258,7 +254,7 @@ export default {
         as the body of an anonymous function.  To store the return value, use 
         the 'return' keyword and provide a variable name in the value input field.`,
     target: ArgTypes.script,
-    value: ArgTypes.variableName,
+    value: ArgTypes.variableNameOptional,
   },
   executeAsyncScript: {
     name: 'execute async script',
@@ -268,7 +264,7 @@ export default {
         The Promise result will be saved on the variable if you use the 'return' 
         keyword.`,
     target: ArgTypes.script,
-    value: ArgTypes.variableName,
+    value: ArgTypes.variableNameOptional,
   },
   forEach: {
     name: 'for each',
@@ -633,4 +629,9 @@ export default {
     target: ArgTypes.conditionalExpression,
     value: ArgTypes.loopLimit,
   },
-} as CommandTypes
+}
+
+export default commands
+
+export type CommandTypes = typeof commands
+export type CommandKey = keyof CommandTypes

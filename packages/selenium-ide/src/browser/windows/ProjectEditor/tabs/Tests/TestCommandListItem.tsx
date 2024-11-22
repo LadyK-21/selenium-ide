@@ -16,21 +16,27 @@ const {
 } = window.sideAPI
 
 const commandTextFormat = { color: 'primary.main', typography: 'body2' }
+const commentTextFormat = {
+  color: 'info.main',
+  ml: 2,
+  typography: 'subtitle2',
+}
 const argTextFormat = {
   color: 'secondary.main',
-  typography: 'subtitle2',
   ml: 2,
+  typography: 'subtitle2',
 }
 const errorTextFormat = {
   color: 'error.main',
-  typography: 'caption',
   ml: 2,
+  typography: 'caption',
 }
 
 interface CommandRowProps {
   activeTest: string
   commandState: PlaybackEventShapes['COMMAND_STATE_CHANGED']
   command: CommandShape
+  disabled?: boolean
   index: number
   reorderPreview: ReorderPreview
   resetPreview: () => void
@@ -47,10 +53,14 @@ const updateIsBreakpoint = (
   })
 }
 
+export const defaultCommandState =
+  {} as unknown as PlaybackEventShapes['COMMAND_STATE_CHANGED']
+
 const CommandRow: React.FC<CommandRowProps> = ({
   activeTest,
-  commandState = {},
-  command: { command, id, isBreakpoint, target, value },
+  commandState = defaultCommandState,
+  command: { command, comment, id, isBreakpoint, opensWindow, target, value },
+  disabled = false,
   index,
   reorderPreview,
   resetPreview,
@@ -69,6 +79,8 @@ const CommandRow: React.FC<CommandRowProps> = ({
     <ReorderableListItem
       className={mainClass}
       divider
+      data-command-id={id}
+      data-command={commandText}
       dragType="COMMAND"
       id={id}
       index={index}
@@ -90,6 +102,7 @@ const CommandRow: React.FC<CommandRowProps> = ({
       secondaryAction={
         <IconButton
           color={isBreakpoint ? 'primary' : 'default'}
+          disabled={disabled}
           edge="end"
           onClick={toggleBreakpoint}
         >
@@ -103,11 +116,16 @@ const CommandRow: React.FC<CommandRowProps> = ({
         disableTypography
         primary={
           <Box sx={commandTextFormat}>
-            {camelToTitleCase(commandText)} {isDisabled ? '[Disabled]' : ''}
+            {camelToTitleCase(commandText)}&nbsp;
+            {opensWindow ? '(Opens window)' : ''}&nbsp;
+            {isDisabled ? '[Disabled]' : ''}
           </Box>
         }
         secondary={
           <>
+            {comment && (
+              <Box sx={commentTextFormat}>// {comment}</Box>
+            )}
             <Box sx={argTextFormat}>{target}</Box>
             <Box sx={argTextFormat}>{value}</Box>
             <Box sx={errorTextFormat}>{commandState.message}</Box>

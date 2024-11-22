@@ -21,10 +21,19 @@ const performSubscription = async (
       })
     }
     window.sideAPI.state.onMutate.addListener(handler)
-    const removeHandler = () => window.sideAPI.state.onMutate.removeListener(handler)
-    window.addEventListener('beforeunload', removeHandler)
+    const removeHandler = () => {
+      try {
+        window.sideAPI.state.onMutate.removeListener(handler)
+      } catch (e) {}
+    };
+    // window.addEventListener('beforeunload', removeHandler)
     return removeHandler
   }, [])
+}
+
+export const defaultSession = {
+  project: defaultProject,
+  state: defaultState,
 }
 
 export default () => {
@@ -32,6 +41,7 @@ export default () => {
     project: defaultProject,
     state: defaultState,
   })
+  console.debug('activeTestID:'+session.state.activeTestID)
   performSubscription(updateSession)
   return session
 }

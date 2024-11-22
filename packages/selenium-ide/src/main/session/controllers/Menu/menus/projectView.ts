@@ -1,10 +1,9 @@
 import { BrowserWindow } from 'electron'
-import { Menu } from 'electron'
-import { MenuComponent, Session } from 'main/types'
+import { MenuComponent } from 'main/types'
 import { platform } from 'os'
-import { multipleCommand } from '../utils'
+import { menuFactoryFromCommandFactory, multipleCommand } from '../utils'
 
-export const projectViewCommands: MenuComponent = (session) => async () =>
+export const commands: MenuComponent = (session) => () =>
   [
     ...multipleCommand(
       platform() === 'win32'
@@ -16,7 +15,7 @@ export const projectViewCommands: MenuComponent = (session) => async () =>
           const window = BrowserWindow.getFocusedWindow()
           window?.webContents.openDevTools()
         },
-        label: 'Show DevTools',
+        label: session.system.languageMap.viewMenuTree.showDevTools,
       }
     ),
     {
@@ -24,13 +23,29 @@ export const projectViewCommands: MenuComponent = (session) => async () =>
       click: async () => {
         await session.windows.initializePlaybackWindow()
       },
-      label: 'Reset Playback Windows',
+      label: session.system.languageMap.viewMenuTree.resetPlaybackWindows,
+    },
+    {
+      accelerator: 'CommandOrControl+R',
+      label: session.system.languageMap.viewMenuTree.refreshPlaybackWindow,
+      click: async () => {
+        const window = await session.windows.getActivePlaybackWindow()
+        if (window) {
+          await window.webContents.executeJavaScript('window.location.reload()')
+          if (session.state.state.status === 'recording') {
+            await session.api.recorder.recordNewCommand(
+              {
+                command: 'executeScript',
+                comment: 'Reload the page',
+                target: 'window.location.reload()',
+                value: '',
+              },
+              true
+            )
+          }
+        }
+      },
     },
   ]
 
-const projectViewMenu = (session: Session) => async () => {
-  const menuItems = await projectViewCommands(session)()
-  return Menu.buildFromTemplate(menuItems)
-}
-
-export default projectViewMenu
+export default menuFactoryFromCommandFactory(commands)

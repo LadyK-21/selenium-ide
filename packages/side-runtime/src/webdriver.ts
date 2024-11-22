@@ -17,10 +17,8 @@
 
 import webdriver, {
   Capabilities,
-  Condition as ConditionShape,
   WebDriver,
   WebElement as WebElementShape,
-  WebElementCondition as WebElementConditionShape,
 } from 'selenium-webdriver'
 import { absolutifyUrl } from './utils'
 import {
@@ -33,20 +31,20 @@ import { AssertionError, VerificationError } from './errors'
 import Variables from './variables'
 import { Fn } from '@seleniumhq/side-commons'
 import { CommandShape } from '@seleniumhq/side-model'
-import { PluginShape } from './types'
+import {
+  PluginRuntimeShape,
+  StoreWindowHandleHookInput,
+  WindowAppearedHookInput,
+  WindowSwitchedHookInput,
+} from './types'
+import { inspect } from 'util'
 
 const {
-  By,
-  Condition,
-  until,
-  Key,
-  WebElement,
-  WebElementCondition,
-  WebElementPromise,
-} = webdriver
-const { TimeoutError } = webdriver.error
+  version: SeleniumWebdriverVersion,
+} = require('selenium-webdriver/package.json')
 
-const POLL_TIMEOUT = 50
+const { By, Condition, until, Key, WebElementCondition } = webdriver
+
 export type ExpandedCapabilities = Partial<Capabilities> & {
   browserName: string
   'goog:chromeOptions'?: Record<string, boolean | number | string | string[]>
@@ -71,17 +69,17 @@ export interface WindowAPI {
 
 export interface WebDriverExecutorConstructorArgs {
   capabilities?: ExpandedCapabilities
-  customCommands?: PluginShape['commands']
+  customCommands?: PluginRuntimeShape['commands']
   disableCodeExportCompat?: boolean
   driver?: WebDriver
   hooks?: WebDriverExecutorHooks
   implicitWait?: number
   server?: string
-  windowAPI?: WindowAPI
 }
 
 export interface WebDriverExecutorInitOptions {
   baseUrl: string
+  debug?: boolean
   logger: Console
   variables: Variables
 }
@@ -98,31 +96,18 @@ export interface CommandHookInput {
   command: CommandShape
 }
 
-export interface StoreWindowHandleHookInput {
-  windowHandle: string
-  windowHandleName: string
-}
-
-export interface WindowAppearedHookInput {
-  command: CommandShape
-  windowHandleName: CommandShape['windowHandleName']
-  windowHandle?: string | Error
-}
-
-export interface WindowSwitchedHookInput {
-  windowHandle?: string | Error
-}
+export type GeneralHook<T> = (input: T) => Promise<void> | void
 
 export interface WebDriverExecutorHooks {
-  onBeforePlay?: (input: BeforePlayHookInput) => Promise<void> | void
-  onAfterCommand?: (input: CommandHookInput) => Promise<void> | void
-  onBeforeCommand?: (input: CommandHookInput) => Promise<void> | void
-  onStoreWindowHandle?: (
-    input?: StoreWindowHandleHookInput
-  ) => Promise<void> | void
-  onWindowAppeared?: (input: WindowAppearedHookInput) => Promise<void> | void
-  onWindowSwitched?: (input: WindowSwitchedHookInput) => Promise<void> | void
+  onBeforePlay?: GeneralHook<BeforePlayHookInput>
+  onAfterCommand?: GeneralHook<CommandHookInput>
+  onBeforeCommand?: GeneralHook<CommandHookInput>
+  onStoreWindowHandle?: GeneralHook<StoreWindowHandleHookInput>
+  onWindowAppeared?: GeneralHook<WindowAppearedHookInput>
+  onWindowSwitched?: GeneralHook<WindowSwitchedHookInput>
 }
+
+export type HookKeys = keyof WebDriverExecutorHooks
 
 export interface ElementEditableScriptResult {
   enabled: boolean
@@ -134,12 +119,6 @@ export interface ScriptShape {
   argv: any[]
 }
 
-const defaultWindowAPI: WindowAPI = {
-  setWindowSize: async (executor: WebDriverExecutor, width, height) => {
-    await executor.driver.manage().window().setRect({ width, height })
-  },
-}
-
 export default class WebDriverExecutor {
   constructor({
     customCommands = {},
@@ -149,7 +128,6 @@ export default class WebDriverExecutor {
     server,
     hooks = {},
     implicitWait,
-    windowAPI = defaultWindowAPI,
   }: WebDriverExecutorConstructorArgs) {
     if (driver) {
       this.driver = driver
@@ -163,19 +141,17 @@ export default class WebDriverExecutor {
     this.hooks = hooks
     this.waitForNewWindow = this.waitForNewWindow.bind(this)
     this.customCommands = customCommands
-    this.windowAPI = windowAPI
   }
   baseUrl?: string
   // @ts-expect-error
   variables: Variables
   cancellable?: { cancel: () => void }
   capabilities?: ExpandedCapabilities
-  customCommands: Required<PluginShape>['commands']
+  customCommands: Required<PluginRuntimeShape>['commands']
   disableCodeExportCompat: boolean
   // @ts-expect-error
   driver: WebDriver
   server?: string
-  windowAPI: WindowAPI
   windowHandle?: string
   hooks: WebDriverExecutorHooks
   implicitWait: number
@@ -183,22 +159,104 @@ export default class WebDriverExecutor {
   logger?: Console;
   [state]?: any
 
-  async init({ baseUrl, logger, variables }: WebDriverExecutorInitOptions) {
+  getDriverSync({
+    debug,
+    logger,
+  }: Pick<
+    WebDriverExecutorInitOptions,
+    'debug' | 'logger'
+  >): webdriver.ThenableWebDriver {
+    const { browserName, ...capabilities } = this
+      .capabilities as ExpandedCapabilities
+    if (debug) {
+      logger.info('Building driver for ' + browserName)
+      logger.info(
+        'Driver attributes:' +
+          inspect({
+            capabilities,
+            server: this.server,
+            browserName,
+          })
+      )
+    }
+    let builder = new webdriver.Builder().withCapabilities(capabilities)
+    if (this.server) {
+      builder = builder.usingServer(this.server)
+    }
+    return builder.forBrowser(browserName).build()
+  }
+  async getDriver({
+    debug,
+    logger,
+  }: Pick<WebDriverExecutorInitOptions, 'debug' | 'logger'>) {
+    const { browserName, ...capabilities } = this
+      .capabilities as ExpandedCapabilities
+    try {
+      const driver = await new Promise<
+        Awaited<ReturnType<typeof this.getDriverSync>>
+      >((resolve, reject) => {
+        setTimeout(() => {
+          reject(
+            new Error(
+              'Driver took too long to build. This is likely an issue with the browser or driver.'
+            )
+          )
+        }, 30000)
+        this.getDriverSync({ debug, logger }).then(resolve, reject)
+      })
+      debug && logger.info('Driver has been built for ' + browserName)
+      return driver
+    } catch (e) {
+      if (debug) {
+        const driverCode =
+          'const driver = new webdriver.Builder()' +
+          `.withCapabilities(${JSON.stringify(capabilities)})` +
+          (this.server ? `.usingServer('${this.server}')` : '') +
+          `.forBrowser('${browserName}').build()`
+        console.error(`
+          Failed to build driver for ${browserName}
+          Supplied capabilities: ${JSON.stringify(capabilities)}
+          Server: ${this.server || 'none'}
+          Error: ${e}
+
+          OS: ${process.platform}
+          Node: ${process.version}
+          Selenium-Webdriver: ${SeleniumWebdriverVersion}
+
+          This is breaking at the boundary of the following code in selenium-webdriver:
+
+          // BEGIN SELENIUM-WEBDRIVER CODE
+          const webdriver = require('selenium-webdriver')
+          ${driverCode}
+          // END SELENIUM-WEBDRIVER CODE
+
+          To ensure the bug is in selenium IDE, please attempt to run the above code in a script or node REPL.
+          You may have to npm install selenium-webdriver first.
+
+          If you are unable to proceed further, please raise a bug here:
+          https://github.com/SeleniumHQ/selenium/issues/new?assignees=&labels=I-defect%2Cneeds-triaging&projects=&template=bug-report.yml&title=%5B%F0%9F%90%9B+Bug%5D%3A+
+
+          If this code works in selenium-webdriver, but not the IDE or side-runner, please raise a bug here:
+          https://github.com/SeleniumHQ/selenium-ide/issues/new?assignees=&labels=&projects=&template=bug.md
+        `)
+      }
+      throw e
+    }
+  }
+
+  async init({
+    baseUrl,
+    debug,
+    logger,
+    variables,
+  }: WebDriverExecutorInitOptions) {
     this.baseUrl = baseUrl
     this.logger = logger
     this.variables = variables
     this[state] = {}
 
     if (!this.driver) {
-      const { browserName, ...capabilities } = this
-        .capabilities as ExpandedCapabilities
-      this.logger.info('Building driver for ' + browserName)
-      this.driver = await new webdriver.Builder()
-        .withCapabilities(capabilities)
-        .usingServer(this.server as string)
-        .forBrowser(browserName)
-        .build()
-      this.logger.info('Driver has been built for ' + browserName)
+      this.driver = await this.getDriver({ debug, logger })
     }
     this.initialized = true
   }
@@ -209,9 +267,14 @@ export default class WebDriverExecutor {
     }
   }
 
-  async cleanup() {
-    if (this.initialized) {
-      await this.driver.quit()
+  async cleanup(persistSession = false) {
+    // await this.cancel()
+    if (this.driver) {
+      if (persistSession) {
+        await this.driver.close()
+      } else {
+        await this.driver.quit()
+      }
       // @ts-expect-error
       this.driver = undefined
       this.initialized = false
@@ -229,28 +292,32 @@ export default class WebDriverExecutor {
       return 'skip'
     }
 
-    const upperCase = command.charAt(0).toUpperCase() + command.slice(1)
-    const func = 'do' + upperCase
+    if (this.customCommands[command]) {
+      return command
+    }
+    const func = this.nameTransform(command)
     // @ts-expect-error The functions can be overridden by custom commands and stuff
     if (!this[func]) {
-      if (this.customCommands[command]) {
-        return command
-      }
       throw new Error(`Unknown command ${command}`)
     }
     return func
   }
 
-  async executeHook<T extends keyof WebDriverExecutorHooks>(
+  nameTransform(command: string) {
+    const upperCase = command.charAt(0).toUpperCase() + command.slice(1)
+    return 'do' + upperCase
+  }
+
+  async executeHook<T extends HookKeys>(
     hook: T,
     ...args: Parameters<NonNullable<WebDriverExecutorHooks[T]>>
   ) {
-    const fn = this.hooks[hook] as WebDriverExecutorHooks[T]
+    type HookContents = WebDriverExecutorHooks[T]
+    type HookParameters = Parameters<NonNullable<HookContents>>
+    const fn = this.hooks[hook] as HookContents
     if (!fn) return
-    await fn.apply(
-      this,
-      args as Parameters<NonNullable<WebDriverExecutorHooks[T]>>
-    )
+    // @ts-expect-error it's okay, this shape is fine
+    await fn.apply(this, args as HookParameters)
   }
 
   async beforeCommand(commandObject: CommandShape) {
@@ -279,7 +346,7 @@ export default class WebDriverExecutor {
   async waitForNewWindow(timeout: number = 2000) {
     const finder = new Promise<string | undefined>((resolve) => {
       const start = Date.now()
-      const findHandle = async () => {
+      const findHandle = this.withCancel(async () => {
         if (Date.now() - start > timeout) {
           resolve(undefined)
           return
@@ -295,12 +362,12 @@ export default class WebDriverExecutor {
         }
         // cant find, wait next time.
         setTimeout(findHandle, 200)
-      }
+      })
 
       findHandle()
     })
 
-    return this.wait(finder, timeout)
+    return this.driver.wait(finder, timeout)
   }
 
   registerCommand(commandName: string, fn: Fn) {
@@ -320,7 +387,7 @@ export default class WebDriverExecutor {
 
   async doSetWindowSize(widthXheight: string) {
     const [width, height] = widthXheight.split('x').map((v) => parseInt(v))
-    await this.windowAPI.setWindowSize(this, width, height)
+    await this.driver.manage().window().setRect({ width, height })
   }
 
   async doSelectWindow(handleLocator: string) {
@@ -388,12 +455,6 @@ export default class WebDriverExecutor {
     }
   }
 
-  async doSubmit() {
-    throw new Error(
-      '"submit" is not a supported command in Selenium WebDriver. Please re-record the step.'
-    )
-  }
-
   // mouse commands
 
   async doAddSelection(
@@ -403,7 +464,9 @@ export default class WebDriverExecutor {
   ) {
     const element = await this.waitForElement(
       locator,
-      commandObject.targetFallback
+      commandObject.targetFallback,
+      commandObject.targets,
+      commandObject.fallbackTargets
     )
     const option = await element.findElement(parseOptionLocator(optionLocator))
     const selections = (await this.driver.executeScript(
@@ -422,7 +485,9 @@ export default class WebDriverExecutor {
   ) {
     const element = await this.waitForElement(
       locator,
-      commandObject.targetFallback
+      commandObject.targetFallback,
+      commandObject.targets,
+      commandObject.fallbackTargets
     )
 
     if (!(await element.getAttribute('multiple'))) {
@@ -446,7 +511,9 @@ export default class WebDriverExecutor {
   ) {
     const element = await this.waitForElement(
       locator,
-      commandObject.targetFallback
+      commandObject.targetFallback,
+      commandObject.targets,
+      commandObject.fallbackTargets
     )
     if (!(await element.isSelected())) {
       await element.click()
@@ -460,15 +527,27 @@ export default class WebDriverExecutor {
   ) {
     const element = await this.waitForElement(
       locator,
-      commandObject.targetFallback
+      commandObject.targetFallback,
+      commandObject.targets,
+      commandObject.fallbackTargets
     )
     if (await element.isSelected()) {
       await element.click()
     }
   }
 
-  async doClick(locator: string, _: string) {
-    const element = await this.waitForElementVisible(locator, this.implicitWait)
+  async doClick(
+    locator: string,
+    _?: string,
+    commandObject: Partial<CommandShape> = {}
+  ) {
+    const element = await this.waitForElementVisible(
+      locator,
+      this.implicitWait,
+      commandObject.targetFallback,
+      commandObject.targets,
+      commandObject.fallbackTargets
+    )
     await element.click()
   }
 
@@ -480,7 +559,9 @@ export default class WebDriverExecutor {
     const coords = parseCoordString(coordString)
     const element = await this.waitForElement(
       locator,
-      commandObject.targetFallback
+      commandObject.targetFallback,
+      commandObject.targets,
+      commandObject.fallbackTargets
     )
     await this.driver
       .actions({ bridge: true })
@@ -491,12 +572,15 @@ export default class WebDriverExecutor {
 
   async doDoubleClick(
     locator: string,
-    _: string,
-    commandObject: Partial<CommandShape> = {}
+    _?: string,
+    _commandObject?: Partial<CommandShape>
   ) {
+    const commandObject = _commandObject || {}
     const element = await this.waitForElement(
       locator,
-      commandObject.targetFallback
+      commandObject.targetFallback,
+      commandObject.targets,
+      commandObject.fallbackTargets
     )
     await this.driver.actions({ bridge: true }).doubleClick(element).perform()
   }
@@ -509,7 +593,9 @@ export default class WebDriverExecutor {
     const coords = parseCoordString(coordString)
     const element = await this.waitForElement(
       locator,
-      commandObject.targetFallback
+      commandObject.targetFallback,
+      commandObject.targets,
+      commandObject.fallbackTargets
     )
     await this.driver
       .actions({ bridge: true })
@@ -539,12 +625,15 @@ export default class WebDriverExecutor {
 
   async doMouseDown(
     locator: string,
-    _: string,
-    commandObject: Partial<CommandShape> = {}
+    _?: string,
+    _commandObject?: Partial<CommandShape>
   ) {
+    const commandObject = _commandObject || {}
     const element = await this.waitForElement(
       locator,
-      commandObject.targetFallback
+      commandObject.targetFallback,
+      commandObject.targets,
+      commandObject.fallbackTargets
     )
     await this.driver
       .actions({ bridge: true })
@@ -561,7 +650,9 @@ export default class WebDriverExecutor {
     const coords = parseCoordString(coordString)
     const element = await this.waitForElement(
       locator,
-      commandObject.targetFallback
+      commandObject.targetFallback,
+      commandObject.targets,
+      commandObject.fallbackTargets
     )
     await this.driver
       .actions({ bridge: true })
@@ -578,7 +669,9 @@ export default class WebDriverExecutor {
     const coords = parseCoordString(coordString)
     const element = await this.waitForElement(
       locator,
-      commandObject.targetFallback
+      commandObject.targetFallback,
+      commandObject.targets,
+      commandObject.fallbackTargets
     )
     await this.driver
       .actions({ bridge: true })
@@ -588,12 +681,15 @@ export default class WebDriverExecutor {
 
   async doMouseOut(
     locator: string,
-    _: string,
-    commandObject: Partial<CommandShape> = {}
+    _?: string,
+    _commandObject?: Partial<CommandShape>
   ) {
+    const commandObject = _commandObject || {}
     const element = await this.waitForElement(
       locator,
-      commandObject.targetFallback
+      commandObject.targetFallback,
+      commandObject.targets,
+      commandObject.fallbackTargets
     )
     const [rect, vp]: [DOMRect, { height: number; width: number }] =
       await this.driver.executeScript(
@@ -603,7 +699,7 @@ export default class WebDriverExecutor {
 
     // try top
     if (rect.top > 0) {
-      const y = -(rect.height / 2 + 1)
+      const y = Math.round(-(rect.height / 2 + 1))
       return await this.driver
         .actions({ bridge: true })
         .move({ origin: element, y })
@@ -611,7 +707,7 @@ export default class WebDriverExecutor {
     }
     // try right
     else if (vp.width > rect.right) {
-      const x = rect.right / 2 + 1
+      const x = Math.round(rect.right / 2 + 1)
       return await this.driver
         .actions({ bridge: true })
         .move({ origin: element, x })
@@ -619,7 +715,7 @@ export default class WebDriverExecutor {
     }
     // try bottom
     else if (vp.height > rect.bottom) {
-      const y = rect.height / 2 + 1
+      const y = Math.round(rect.height / 2 + 1)
       return await this.driver
         .actions({ bridge: true })
         .move({ origin: element, y })
@@ -627,7 +723,7 @@ export default class WebDriverExecutor {
     }
     // try left
     else if (rect.left > 0) {
-      const x = -rect.right / 2
+      const x = Math.round(-rect.right / 2)
       return await this.driver
         .actions({ bridge: true })
         .move({ origin: element, x })
@@ -641,12 +737,15 @@ export default class WebDriverExecutor {
 
   async doMouseOver(
     locator: string,
-    _: string,
-    commandObject: Partial<CommandShape> = {}
+    _?: string,
+    _commandObject?: Partial<CommandShape>
   ) {
+    const commandObject = _commandObject || {}
     const element = await this.waitForElement(
       locator,
-      commandObject.targetFallback
+      commandObject.targetFallback,
+      commandObject.targets,
+      commandObject.fallbackTargets
     )
     await this.driver
       .actions({ bridge: true })
@@ -656,12 +755,15 @@ export default class WebDriverExecutor {
 
   async doMouseUp(
     locator: string,
-    _: string,
-    commandObject: Partial<CommandShape> = {}
+    _?: string,
+    _commandObject?: Partial<CommandShape>
   ) {
+    const commandObject = _commandObject || {}
     const element = await this.waitForElement(
       locator,
-      commandObject.targetFallback
+      commandObject.targetFallback,
+      commandObject.targets,
+      commandObject.fallbackTargets
     )
     await this.driver
       .actions({ bridge: true })
@@ -678,7 +780,9 @@ export default class WebDriverExecutor {
     const coords = parseCoordString(coordString)
     const element = await this.waitForElement(
       locator,
-      commandObject.targetFallback
+      commandObject.targetFallback,
+      commandObject.targets,
+      commandObject.fallbackTargets
     )
     await this.driver
       .actions({ bridge: true })
@@ -694,10 +798,34 @@ export default class WebDriverExecutor {
   ) {
     const element = await this.waitForElement(
       locator,
-      commandObject.targetFallback
+      commandObject.targetFallback,
+      commandObject.targets,
+      commandObject.fallbackTargets
     )
     const option = await element.findElement(parseOptionLocator(optionLocator))
     await option.click()
+  }
+
+  async doSubmit(
+    locator: string,
+    _?: string,
+    _commandObject?: Partial<CommandShape>
+  ) {
+    const commandObject = _commandObject || {}
+    const element = await this.waitForElement(
+      locator,
+      commandObject.targetFallback,
+      commandObject.targets,
+      commandObject.fallbackTargets
+    )
+
+    console.error(`
+      "submit" is not a good command in Selenium WebDriver. It's not supported by 
+      all browsers and it's manually triggering an event, when it should really
+      be driven out of an interaction (click submit, hit enter, etc).
+      Please re-record the step using a "click" or "sendKeys" command instead.
+    `)
+    await element.submit()
   }
 
   // keyboard commands
@@ -709,7 +837,9 @@ export default class WebDriverExecutor {
   ) {
     const element = await this.waitForElement(
       locator,
-      commandObject.targetFallback
+      commandObject.targetFallback,
+      commandObject.targets,
+      commandObject.fallbackTargets
     )
     await this.driver.executeScript(
       "if(arguments[0].contentEditable === 'true') {arguments[0].innerText = arguments[1]} else {throw new Error('Element is not content editable')}",
@@ -725,10 +855,14 @@ export default class WebDriverExecutor {
   ) {
     const element = await this.waitForElement(
       locator,
-      commandObject.targetFallback
+      commandObject.targetFallback,
+      commandObject.targets,
+      commandObject.fallbackTargets
     )
     await element.clear()
-    await element.sendKeys(value)
+    if (value) {
+      await element.sendKeys(value)
+    }
   }
 
   async doSendKeys(
@@ -738,7 +872,9 @@ export default class WebDriverExecutor {
   ) {
     const element = await this.waitForElement(
       locator,
-      commandObject.targetFallback
+      commandObject.targetFallback,
+      commandObject.targets,
+      commandObject.fallbackTargets
     )
     await element.sendKeys(...value)
   }
@@ -746,40 +882,75 @@ export default class WebDriverExecutor {
   // wait commands
 
   async doWaitForElementEditable(locator: string, timeout: string) {
-    const element = await this.driver.findElement(parseLocator(locator))
-    await this.wait(
-      this.isElementEditable(element),
-      parseInt(timeout),
-      'Timed out waiting for element to be editable'
-    )
+    const condition = new Condition('for element to be editable', async () => {
+      const element = await this.driver.findElement(parseLocator(locator))
+      if (!element) {
+        return null
+      }
+      const isEditable = await this.isElementEditable(element)
+      return isEditable
+    })
+    await this.driver.wait(condition, parseInt(timeout))
   }
 
   async doWaitForElementNotEditable(locator: string, timeout: string) {
-    const element = await this.driver.findElement(parseLocator(locator))
-    await this.wait(
-      this.isElementEditable(element),
-      parseInt(timeout),
-      'Timed out waiting for element to not be editable'
-    )
+    const condition = new Condition('for element to be editable', async () => {
+      const element = await this.driver.findElement(parseLocator(locator))
+      if (!element) {
+        return null
+      }
+      const isEditable = await this.isElementEditable(element)
+      return !isEditable
+    })
+    await this.driver.wait(condition, parseInt(timeout))
   }
 
-  async doWaitForElementPresent(locator: string, timeout: string) {
-    await this.wait(
-      until.elementLocated(parseLocator(locator)),
-      parseInt(timeout)
+  async doWaitForElementPresent(
+    locator: string,
+    timeout: string,
+    commandObj: Partial<CommandShape> = {}
+  ) {
+    const locatorCondition = new WebElementCondition(
+      'for element to be present',
+      async () =>
+        await this.elementIsLocated(
+          locator,
+          commandObj.targetFallback,
+          commandObj.targets,
+          commandObj.fallbackTargets
+        )
     )
+    await this.driver.wait(locatorCondition, Number(timeout))
   }
 
   async doWaitForElementNotPresent(locator: string, timeout: string) {
     const parsedLocator = parseLocator(locator)
     const elements = await this.driver.findElements(parsedLocator)
     if (elements.length !== 0) {
-      await this.wait(until.stalenessOf(elements[0]), parseInt(timeout))
+      const noElementPresentCondition = new Condition(
+        'for element to not be present',
+        async () => {
+          const elements = await this.driver.findElements(parsedLocator)
+          return elements.length === 0
+        }
+      )
+      await this.driver.wait<boolean>(
+        noElementPresentCondition,
+        Number(timeout)
+      )
     }
   }
 
-  async doWaitForElementVisible(locator: string, timeout: string) {
-    await this.waitForElementVisible(locator, parseInt(timeout))
+  async doWaitForElementVisible(
+    locator: string,
+    timeout: string,
+    commandObj: Partial<CommandShape> = {}
+  ) {
+    await this.waitForElementVisible(
+      locator,
+      parseInt(timeout),
+      commandObj.targetFallback
+    )
   }
 
   async doWaitForElementNotVisible(locator: string, timeout: string) {
@@ -787,12 +958,19 @@ export default class WebDriverExecutor {
     const elements = await this.driver.findElements(parsedLocator)
 
     if (elements.length > 0) {
-      await this.wait(until.elementIsNotVisible(elements[0]), parseInt(timeout))
+      await this.driver.wait(
+        until.elementIsNotVisible(elements[0]),
+        parseInt(timeout)
+      )
     }
   }
 
-  async doWaitForText(locator: string, text: string) {
-    await this.waitForText(locator, text)
+  async doWaitForText(
+    locator: string,
+    text: string,
+    commandObj: Partial<CommandShape> = {}
+  ) {
+    await this.waitForText(locator, text, commandObj.targetFallback)
   }
 
   // script commands
@@ -881,7 +1059,9 @@ export default class WebDriverExecutor {
   ) {
     const element = await this.waitForElement(
       locator,
-      commandObject.targetFallback
+      commandObject.targetFallback,
+      commandObject.targets,
+      commandObject.fallbackTargets
     )
     const text = await element.getText()
     this.variables.set(variable, text)
@@ -899,7 +1079,9 @@ export default class WebDriverExecutor {
   ) {
     const element = await this.waitForElement(
       locator,
-      commandObject.targetFallback
+      commandObject.targetFallback,
+      commandObject.targets,
+      commandObject.fallbackTargets
     )
     const value = await element.getAttribute('value')
     this.variables.set(variable, value)
@@ -955,12 +1137,15 @@ export default class WebDriverExecutor {
 
   async doAssertEditable(
     locator: string,
-    _: string,
-    commandObject: Partial<CommandShape> = {}
+    _?: string,
+    _commandObject?: Partial<CommandShape>
   ) {
+    const commandObject = _commandObject || {}
     const element = await this.waitForElement(
       locator,
-      commandObject.targetFallback
+      commandObject.targetFallback,
+      commandObject.targets,
+      commandObject.fallbackTargets
     )
     if (!(await this.isElementEditable(element))) {
       throw new AssertionError('Element is not editable')
@@ -969,12 +1154,15 @@ export default class WebDriverExecutor {
 
   async doAssertNotEditable(
     locator: string,
-    _: string,
-    commandObject: Partial<CommandShape> = {}
+    _?: string,
+    _commandObject?: Partial<CommandShape>
   ) {
+    const commandObject = _commandObject || {}
     const element = await this.waitForElement(
       locator,
-      commandObject.targetFallback
+      commandObject.targetFallback,
+      commandObject.targets,
+      commandObject.fallbackTargets
     )
     if (await this.isElementEditable(element)) {
       throw new AssertionError('Element is editable')
@@ -1026,7 +1214,9 @@ export default class WebDriverExecutor {
   ) {
     const element = await this.waitForElement(
       locator,
-      commandObject.targetFallback
+      commandObject.targetFallback,
+      commandObject.targets,
+      commandObject.fallbackTargets
     )
     const text = await element.getText()
     if (text !== value) {
@@ -1043,7 +1233,9 @@ export default class WebDriverExecutor {
   ) {
     const element = await this.waitForElement(
       locator,
-      commandObject.targetFallback
+      commandObject.targetFallback,
+      commandObject.targets,
+      commandObject.fallbackTargets
     )
     const text = await element.getText()
     if (text === value) {
@@ -1060,7 +1252,9 @@ export default class WebDriverExecutor {
   ) {
     const element = await this.waitForElement(
       locator,
-      commandObject.targetFallback
+      commandObject.targetFallback,
+      commandObject.targets,
+      commandObject.fallbackTargets
     )
     const elementValue = await element.getAttribute('value')
     if (elementValue !== value) {
@@ -1078,7 +1272,9 @@ export default class WebDriverExecutor {
   ) {
     const element = await this.waitForElement(
       locator,
-      commandObject.targetFallback
+      commandObject.targetFallback,
+      commandObject.targets,
+      commandObject.fallbackTargets
     )
     const elementValue = await element.getAttribute('value')
     if (elementValue === value) {
@@ -1095,7 +1291,9 @@ export default class WebDriverExecutor {
   ) {
     const element = await this.waitForElement(
       locator,
-      commandObject.targetFallback
+      commandObject.targetFallback,
+      commandObject.targets,
+      commandObject.fallbackTargets
     )
     if (!(await element.isSelected())) {
       throw new AssertionError('Element is not checked, expected to be checked')
@@ -1109,7 +1307,9 @@ export default class WebDriverExecutor {
   ) {
     const element = await this.waitForElement(
       locator,
-      commandObject.targetFallback
+      commandObject.targetFallback,
+      commandObject.targets,
+      commandObject.fallbackTargets
     )
     if (await element.isSelected()) {
       throw new AssertionError('Element is checked, expected to be unchecked')
@@ -1123,7 +1323,9 @@ export default class WebDriverExecutor {
   ) {
     const element = await this.waitForElement(
       locator,
-      commandObject.targetFallback
+      commandObject.targetFallback,
+      commandObject.targets,
+      commandObject.fallbackTargets
     )
     const elementValue = await element.getAttribute('value')
     if (elementValue !== value) {
@@ -1140,7 +1342,9 @@ export default class WebDriverExecutor {
   ) {
     const element = await this.waitForElement(
       locator,
-      commandObject.targetFallback
+      commandObject.targetFallback,
+      commandObject.targets,
+      commandObject.fallbackTargets
     )
     const elementValue = await element.getAttribute('value')
     if (elementValue === value) {
@@ -1157,7 +1361,9 @@ export default class WebDriverExecutor {
   ) {
     const element = await this.waitForElement(
       locator,
-      commandObject.targetFallback
+      commandObject.targetFallback,
+      commandObject.targets,
+      commandObject.fallbackTargets
     )
     const selectedValue = await element.getAttribute('value')
     const selectedOption = await element.findElement(
@@ -1182,7 +1388,9 @@ export default class WebDriverExecutor {
   ) {
     const element = await this.waitForElement(
       locator,
-      commandObject?.targetFallback
+      commandObject.targetFallback,
+      commandObject.targets,
+      commandObject.fallbackTargets
     )
     const selectedValue = await element.getAttribute('value')
     const selectedOption = await element.findElement(
@@ -1224,7 +1432,7 @@ export default class WebDriverExecutor {
     script: ScriptShape
   ): Promise<WebDriverExecutorCondEvalResult> {
     const result = await this.driver.executeScript(
-      `return (${script.script})`,
+      interpolateScript(`return (${script.script})`, this.variables).script,
       ...script.argv
     )
     return {
@@ -1232,30 +1440,64 @@ export default class WebDriverExecutor {
     }
   }
 
-  async waitForElement(
+  async elementIsLocated(
     locator: string,
-    fallback: [string, string][] = []
-  ): Promise<WebElementShape> {
+    ..._fallbacks: (undefined | [string, string][])[]
+  ): Promise<WebElementShape | null> {
     const elementLocator = parseLocator(locator)
-    try {
-      return (await this.wait<WebElementShape>(
-        until.elementLocated(elementLocator),
-        this.implicitWait
-      )) as WebElementShape
-    } catch (err) {
-      if (fallback) {
-        for (let i = 0; i < fallback.length; i++) {
-          try {
-            let loc = parseLocator(fallback[i][0])
-            return await this.driver.findElement(loc)
-          } catch (e) {
-            // try the next one
-          }
-        }
+    const matches = await this.driver.findElements(elementLocator)
+    if (matches.length > 0) return matches[0]
+    return null
+    // Fallback selectors are not visible or editable enough for now.
+    // They create points of user confusion and are not necessary for the vast majority of cases.
+    /*
+    const fallbacks = _fallbacks.filter(Boolean).flat() as [string, string][]
+    for (let i = 0; i < fallbacks.length; i++) {
+      const loc = parseLocator(fallbacks[i][0])
+      const fallbackMatches = await this.driver.findElements(loc)
+      if (fallbackMatches.length) return fallbackMatches[0]
+    }
+    return null
+    */
+  }
+
+  withCancel<T extends () => Promise<any>>(poller: T) {
+    let resolveCancel: (value?: unknown) => void
+    const cancelPromise = new Promise((res) => {
+      resolveCancel = res
+    })
+    let cancelled = false
+    this.cancellable = {
+      cancel: () => {
+        cancelled = true
+        return cancelPromise
+      },
+    }
+    return async () => {
+      if (cancelled) {
+        resolveCancel()
+        throw new Error('aborted')
       }
-      throw err
+      return await poller()
     }
   }
+
+  async waitForElement(
+    locator: string,
+    ...fallbacks: (undefined | [string, string][])[]
+  ): Promise<WebElementShape> {
+    const locatorCondition = new WebElementCondition(
+      'for element to be located',
+      this.withCancel(
+        async () => await this.elementIsLocated(locator, ...fallbacks)
+      )
+    )
+    return await this.driver.wait<WebElementShape>(
+      locatorCondition,
+      this.implicitWait
+    )
+  }
+
   async isElementEditable(element: WebElementShape) {
     const { enabled, readonly } =
       await this.driver.executeScript<ElementEditableScriptResult>(
@@ -1265,172 +1507,48 @@ export default class WebDriverExecutor {
     return enabled && !readonly
   }
 
-  async retryToAllowForIntermittency(locator: string, timeout: number) {
-    const startTime = Date.now()
-    const element = (await this.wait<WebElementShape>(
-      until.elementLocated(parseLocator(locator)),
-      timeout
-    )) as WebElementShape
-    const elapsed = Date.now() - startTime
-    await this.wait(until.elementIsVisible(element), timeout - elapsed)
-    return element
-  }
-
-  async waitForElementVisible(locator: string, timeout: number) {
-    const startTime = Date.now()
-    const element = (await this.wait<WebElementShape>(
-      until.elementLocated(parseLocator(locator)),
-      timeout
-    )) as WebElementShape
-    const elapsed = Date.now() - startTime
-    await this.wait(until.elementIsVisible(element), timeout - elapsed)
-    return element
-  }
-
-  async waitForText(locator: string, text: string) {
-    const startTime = Date.now()
-    const timeout = this.implicitWait
-    const element = (await this.wait<WebElementShape>(
-      until.elementLocated(parseLocator(locator)),
-      timeout
-    )) as WebElementShape
-    const elapsed = Date.now() - startTime
-    await this.wait(until.elementTextIs(element, text), timeout - elapsed)
-  }
-
-  async wait<T extends any>(
-    condition: Promise<T> | ConditionShape<T> | WebElementConditionShape,
-    timeout: number = 0,
-    message: string = '',
-    pollTimeout: number = POLL_TIMEOUT
-  ): Promise<T | Error> {
-    if (typeof timeout !== 'number' || timeout < 0) {
-      throw TypeError('timeout must be a number >= 0: ' + timeout)
-    }
-
-    if (typeof pollTimeout !== 'number' || pollTimeout < 0) {
-      throw TypeError('pollTimeout must be a number >= 0: ' + pollTimeout)
-    }
-
-    if (isConditionPromiseLike(condition)) {
-      return new Promise((resolve, reject) => {
-        if (!timeout) {
-          resolve(condition)
-          return
-        }
-
-        let start = Date.now()
-        let timer: NodeJS.Timeout | null = setTimeout(function () {
-          timer = null
-          reject(
-            new TimeoutError(
-              (message ? `${message}\n` : '') +
-                'Timed out waiting for promise to resolve after ' +
-                (Date.now() - start) +
-                'ms'
-            )
-          )
-        }, timeout)
-        const clearTimer = () => timer && clearTimeout(timer)
-
-        condition
-          .then((value: T) => {
-            clearTimer()
-            resolve(value)
-          })
-          .catch((error: Error) => {
-            clearTimer()
-            reject(error)
-          })
-      })
-    }
-
-    // @ts-expect-error
-    let fn: Fn = condition
-    if (condition instanceof Condition) {
-      message = message || condition.description()
-      fn = condition.fn
-    }
-
-    if (typeof fn !== 'function') {
-      throw TypeError(
-        'Wait condition must be a promise-like object, function, or a ' +
-          'Condition object'
-      )
-    }
-
-    const { driver } = this
-    function evaluateCondition() {
-      return new Promise((resolve, reject) => {
+  async waitForElementVisible(
+    locator: string,
+    timeout: number,
+    ...fallbacks: (undefined | [string, string][])[]
+  ) {
+    const visibleCondition = new WebElementCondition(
+      'for element to be visible',
+      this.withCancel(async () => {
+        const el = await this.elementIsLocated(locator, ...fallbacks)
+        if (!el) return null
         try {
-          resolve(fn(driver))
-        } catch (ex) {
-          reject(ex)
+          if (!(await el.isDisplayed())) return null
+        } catch (e) {
+          return null
+        }
+        return el
+      })
+    )
+    return await this.driver.wait<WebElementShape>(visibleCondition, timeout)
+  }
+
+  async waitForText(
+    locator: string,
+    text: string,
+    fallback: [string, string][] = []
+  ) {
+    const timeout = this.implicitWait
+    const textCondition = new Condition(
+      'for text to be present in element',
+      this.withCancel(async () => {
+        const el = await this.elementIsLocated(locator, fallback)
+        if (!el) return null
+        try {
+          const elText = (await el.getText()).replace(/\u00A0/g, ' ').trim()
+          return elText === text.replace(/\u00A0/g, ' ').trim()
+        } catch (e) {
+          return null
         }
       })
-    }
-
-    let result = new Promise((resolve, reject) => {
-      const startTime = Date.now()
-      let cancelled = false
-      let resolveCancel: Fn
-      const cancelPromise = new Promise((res) => {
-        resolveCancel = res
-      })
-      this.cancellable = {
-        cancel: () => {
-          cancelled = true
-          return cancelPromise
-        },
-      }
-      const pollCondition = async () => {
-        evaluateCondition().then((value) => {
-          const elapsed = Date.now() - startTime
-          if (cancelled) {
-            resolveCancel()
-            reject(new Error('Aborted by user'))
-            this.cancellable = undefined
-          } else if (value) {
-            resolve(value)
-            this.cancellable = undefined
-          } else if (timeout && elapsed >= timeout) {
-            reject(
-              new TimeoutError(
-                (message ? `${message}\n` : '') +
-                  `Wait timed out after ${elapsed}ms`
-              )
-            )
-            this.cancellable = undefined
-          } else {
-            setTimeout(pollCondition, pollTimeout)
-          }
-        }, reject)
-      }
-      pollCondition()
-    })
-
-    if (condition instanceof WebElementCondition) {
-      result = new WebElementPromise(
-        driver,
-        result.then(function (value) {
-          if (!(value instanceof WebElement)) {
-            throw TypeError(
-              'WebElementCondition did not resolve to a WebElement: ' +
-                Object.prototype.toString.call(value)
-            )
-          }
-          return value
-        })
-      )
-    }
-    return result as T
+    )
+    await this.driver.wait<boolean>(textCondition, timeout)
   }
-}
-
-function isConditionPromiseLike<T>(
-  condition: ConditionShape<T> | Promise<T> | WebElementConditionShape
-): condition is Promise<T> {
-  return condition && typeof (condition as Promise<T>).then === 'function'
 }
 
 WebDriverExecutor.prototype.doOpen = composePreprocessors(
@@ -1709,6 +1827,18 @@ WebDriverExecutor.prototype.doAssertEditable = composePreprocessors(
   WebDriverExecutor.prototype.doAssertEditable
 )
 
+WebDriverExecutor.prototype.doAssertElementPresent = composePreprocessors(
+  interpolateString,
+  null,
+  WebDriverExecutor.prototype.doAssertElementPresent
+)
+
+WebDriverExecutor.prototype.doAssertElementNotPresent = composePreprocessors(
+  interpolateString,
+  null,
+  WebDriverExecutor.prototype.doAssertElementNotPresent
+)
+
 WebDriverExecutor.prototype.doAssertNotEditable = composePreprocessors(
   interpolateString,
   null,
@@ -1722,16 +1852,107 @@ WebDriverExecutor.prototype.doAssertPrompt = composePreprocessors(
   WebDriverExecutor.prototype.doAssertPrompt
 )
 
+WebDriverExecutor.prototype.doAssertNotText = composePreprocessors(
+  interpolateString,
+  interpolateString,
+  { targetFallback: preprocessArray(interpolateString) },
+  WebDriverExecutor.prototype.doAssertNotText
+)
+
 WebDriverExecutor.prototype.doAssertText = composePreprocessors(
   interpolateString,
   interpolateString,
+  { targetFallback: preprocessArray(interpolateString) },
   WebDriverExecutor.prototype.doAssertText
+)
+
+WebDriverExecutor.prototype.doAssertTitle = composePreprocessors(
+  interpolateString,
+  null,
+  WebDriverExecutor.prototype.doAssertTitle
+)
+
+WebDriverExecutor.prototype.doAssertValue = composePreprocessors(
+  interpolateString,
+  interpolateString,
+  { targetFallback: preprocessArray(interpolateString) },
+  WebDriverExecutor.prototype.doAssertValue
+)
+
+WebDriverExecutor.prototype.doAssertNotValue = composePreprocessors(
+  interpolateString,
+  interpolateString,
+  { targetFallback: preprocessArray(interpolateString) },
+  WebDriverExecutor.prototype.doAssertNotValue
+)
+
+WebDriverExecutor.prototype.doAssertChecked = composePreprocessors(
+  interpolateString,
+  { targetFallback: preprocessArray(interpolateString) },
+  WebDriverExecutor.prototype.doAssertChecked
+)
+
+WebDriverExecutor.prototype.doAssertNotChecked = composePreprocessors(
+  interpolateString,
+  { targetFallback: preprocessArray(interpolateString) },
+  WebDriverExecutor.prototype.doAssertNotChecked
+)
+
+WebDriverExecutor.prototype.doAssertNotChecked = composePreprocessors(
+  interpolateString,
+  { targetFallback: preprocessArray(interpolateString) },
+  WebDriverExecutor.prototype.doAssertNotChecked
+)
+
+WebDriverExecutor.prototype.doAssertSelectedValue = composePreprocessors(
+  interpolateString,
+  { targetFallback: preprocessArray(interpolateString) },
+  WebDriverExecutor.prototype.doAssertSelectedValue
+)
+
+WebDriverExecutor.prototype.doAssertNotSelectedValue = composePreprocessors(
+  interpolateString,
+  { targetFallback: preprocessArray(interpolateString) },
+  WebDriverExecutor.prototype.doAssertNotSelectedValue
+)
+
+WebDriverExecutor.prototype.doAssertSelectedLabel = composePreprocessors(
+  interpolateString,
+  interpolateString,
+  { targetFallback: preprocessArray(interpolateString) },
+  WebDriverExecutor.prototype.doAssertSelectedLabel
+)
+
+WebDriverExecutor.prototype.doAssertNotSelectedLabel = composePreprocessors(
+  interpolateString,
+  interpolateString,
+  { targetFallback: preprocessArray(interpolateString) },
+  WebDriverExecutor.prototype.doAssertSelectedLabel
 )
 
 WebDriverExecutor.prototype.doEcho = composePreprocessors(
   interpolateString,
   WebDriverExecutor.prototype.doEcho
 )
+
+const waitCommands: (keyof WebDriverExecutor)[] = [
+  'doWaitForElementEditable',
+  'doWaitForElementNotEditable',
+  'doWaitForElementPresent',
+  'doWaitForElementNotPresent',
+  'doWaitForElementVisible',
+  'doWaitForElementNotVisible',
+  'doWaitForText',
+]
+
+waitCommands.forEach((cmd) => {
+  // @ts-expect-error - Whatever who cares
+  WebDriverExecutor.prototype[cmd] = composePreprocessors(
+    interpolateString,
+    interpolateString,
+    WebDriverExecutor.prototype[cmd]
+  )
+})
 
 function createVerifyCommands(Executor: WebDriverExecutor) {
   // @ts-expect-error
@@ -1868,11 +2089,11 @@ const OPTIONS_LOCATORS = {
       switch (type) {
         case 'mostly-equals':
           return By.xpath(
-            `//option[normalize-space(translate(., '${nbsp}', ' ')) = '${labelBody}']`
+            `.//option[normalize-space(translate(., '${nbsp}', ' ')) = '${labelBody}']`
           )
       }
     }
-    return By.xpath(`//option[. = '${label}']`)
+    return By.xpath(`.//option[. = '${label}']`)
   },
   index: (index: string) => By.css(`*:nth-child(${index})`),
 }

@@ -1,17 +1,12 @@
-import Paper from '@mui/material/Paper'
-import Typography from '@mui/material/Typography'
-import React from 'react'
 import AppWrapper from 'browser/components/AppWrapper'
+import ProjectPlaybackWindow from 'browser/components/PlaybackPanel'
 import renderWhenReady from 'browser/helpers/renderWhenReady'
+import React from 'react'
 
-const ProjectPlaybackControls = () => (
+const PlaybackWindowLanding = () => (
   <AppWrapper>
-    <Paper className="playback-text width-100">
-      <Typography align="center" variant="subtitle1">
-        This is where recording and playback will occur
-      </Typography>
-    </Paper>
+    <ProjectPlaybackWindow />
   </AppWrapper>
 )
 
-renderWhenReady(ProjectPlaybackControls)
+renderWhenReady(PlaybackWindowLanding)

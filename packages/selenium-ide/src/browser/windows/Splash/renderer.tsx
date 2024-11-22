@@ -8,16 +8,18 @@ import Typography from '@mui/material/Typography'
 import AppWrapper from 'browser/components/AppWrapper'
 import React, { useEffect, useState } from 'react'
 import renderWhenReady from 'browser/helpers/renderWhenReady'
+import languageMap from 'browser/I18N/keys'
+import { FormattedMessage } from 'react-intl'
 
 const ProjectEditor = () => {
   const [logPath, setLogPath] = useState<string>('...')
   const [recentProjects, setRecentProjects] = useState<string[]>([])
+
   useEffect(() => {
     window.sideAPI.system.getLogPath().then(setLogPath)
     window.sideAPI.projects.getRecent().then(setRecentProjects)
   }, [])
   const loadProject = async () => {
-    
     const response = await window.sideAPI.dialogs.open()
     if (response.canceled) return
     await window.sideAPI.projects.load(response.filePaths[0])
@@ -30,32 +32,39 @@ const ProjectEditor = () => {
     <AppWrapper>
       <Grid className="centered pt-4" container spacing={2}>
         <Grid item xs={12}>
-          <Typography variant="h4">Welcome to Selenium IDE v4</Typography>
+          <Typography variant="h4">
+            <FormattedMessage id={languageMap.splash.present} /></Typography>
           <Typography variant="caption">
-            Your logfiles are located at "{logPath}"
+            <FormattedMessage id={languageMap.splash.logPath} /> "{logPath}"
           </Typography>
           <Typography variant="subtitle1">
-            Please load a project or create a new one
+            <FormattedMessage id={languageMap.splash.openNotice} />
           </Typography>
         </Grid>
         <Grid item xs={6}>
-          <Button onClick={loadProject} variant="contained">
-            Load Project
+          <Button data-load-project onClick={loadProject} variant="contained">
+            <FormattedMessage id={languageMap.splash.loadProject} />
           </Button>
         </Grid>
         <Grid item xs={6}>
-          <Button onClick={newProject} variant="outlined">
-            New Project
+          <Button data-new-project onClick={newProject} variant="outlined">
+            <FormattedMessage id={languageMap.splash.createProject} />
           </Button>
         </Grid>
         <Grid item xs={12}>
-          <Typography variant="h6">Recent Projects:</Typography>
+          <Typography variant="h6">
+            <FormattedMessage id={languageMap.splash.openRecent} />
+          </Typography>
           <List dense>
             {recentProjects.map((filepath, index) => (
               <ListItem
                 disablePadding
                 key={index}
-                onClick={() => window.sideAPI.projects.load(filepath)}
+                onClick={() => {
+                  window.sideAPI.projects.load(filepath).then(() => {
+                    window.sideAPI.projects.getRecent().then(setRecentProjects)
+                  })
+                }}
               >
                 <ListItemButton>
                   <ListItemText primary={filepath} />

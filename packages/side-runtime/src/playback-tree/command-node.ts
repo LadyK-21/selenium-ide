@@ -18,20 +18,32 @@
 import { Fn } from '@seleniumhq/side-commons'
 import { CommandShape } from '@seleniumhq/side-model'
 import { WebDriverExecutor } from '..'
-import { interpolateScript } from '../preprocessors'
+import { interpolateScript, interpolateString } from '../preprocessors'
 import { CommandNodeOptions } from '../types'
 import Variables from '../variables'
 import { WebDriverExecutorCondEvalResult } from '../webdriver'
 import { ControlFlowCommandChecks } from './commands'
+import { AssertionError, VerificationError } from '../errors'
 
 export interface CommandExecutorOptions {
   executorOverride?: Fn
 }
 
 export interface CommandExecutionResult {
-  next?: Fn
+  next?: CommandNode
   skipped?: boolean
   value?: any
+}
+
+export const getCommandDisplayString = ({
+  comment,
+  command,
+  target,
+  value,
+}: CommandShape) => {
+  const paramsString = [command, target, value].filter((p) => p).join(' ')
+  const commentString = comment ? `(${comment})` : ''
+  return `${paramsString} ${commentString}`
 }
 
 export class CommandNode {
@@ -114,7 +126,7 @@ export class CommandNode {
       return
     } else {
       const { command } = this
-      const { target, value } = command
+      const { comment, target, value } = command
       const commandName = command.command
       const customCommand = commandExecutor.customCommands[commandName]
       const existingCommandName = commandExecutor.name(commandName)
@@ -125,11 +137,28 @@ export class CommandNode {
       const executor = customCommand
         ? () => customCommand.execute(command, commandExecutor)
         : // @ts-expect-error webdriver is too kludged by here
-          () => commandExecutor[existingCommandName](target, value, commandName)
-      const ignoreRetry =
-        commandName === 'pause' || commandName.startsWith('wait')
+          () => commandExecutor[existingCommandName](target, value, command)
+      const cmdList = [
+        'click',
+        'check',
+        'select',
+        'type',
+        'sendKeys',
+        'uncheck',
+      ]
+      const ignoreRetry = !cmdList.includes(commandName)
       if (ignoreRetry) {
-        return executor()
+        try {
+          return await executor()
+        } catch (e) {
+          const err = e as Error
+          err.message =
+            err.message +
+            ` during${
+              comment ? ` (${comment})` : ''
+            } ${commandName}:${target}:${value}`
+          throw err
+        }
       }
       return this.retryCommand(
         executor,
@@ -142,26 +171,40 @@ export class CommandNode {
     return new Promise((resolve) => setTimeout(resolve, timeout))
   }
 
-  async retryCommand(
+  retryCommand(
     execute: () => Promise<unknown>,
     timeout: number
   ): Promise<unknown> {
-    const timeLimit = timeout - Date.now()
-    const expirationTimer = setTimeout(() => {
-      throw new Error(
-        `Operation timed out running command ${this.command.command}:${this.command.target}:${this.command.value}`
-      )
-    }, timeLimit)
-    try {
-      const result = await execute()
-      clearTimeout(expirationTimer)
-      return result
-    } catch (e) {
-      clearTimeout(expirationTimer)
-      this.handleTransientError(e, timeout)
-      await this.pauseTimeout()
-      return this.retryCommand(execute, timeout)
-    }
+    return new Promise((res, rej) => {
+      const timeLimit = timeout - Date.now()
+      const commandString = `during${
+        this.command.comment ? ` (${this.command.comment})` : ''
+      } ${this.command.command}:${this.command.target}:${this.command.value}`
+      if (timeLimit <= 0) {
+        return rej(new Error(`Operation timed out ${commandString}`))
+      }
+      const expirationTimer = setTimeout(() => {
+        rej(new Error(`Operation timed out ${commandString}`))
+      }, timeLimit)
+      execute()
+        .then((result) => {
+          clearTimeout(expirationTimer)
+          res(result)
+        })
+        .catch((e) => {
+          clearTimeout(expirationTimer)
+          try {
+            this.handleTransientError(e, timeout)
+            setTimeout(() =>
+              this.retryCommand(execute, timeout).then(res).catch(rej)
+            )
+          } catch (e) {
+            const err = e as Error
+            err.message = err.message + ` ${commandString}`
+            rej(err)
+          }
+        })
+    })
   }
 
   _executionResult(result: CommandExecutionResult = {}) {
@@ -173,6 +216,12 @@ export class CommandNode {
   }
 
   handleTransientError(e: unknown, timeout: number) {
+    if (e instanceof VerificationError) {
+      throw e
+    }
+    if (e instanceof AssertionError) {
+      throw e
+    }
     const { command, target, value } = this.command
     const thisCommand = `${command}-${target}-${value}`
     const thisErrorMessage = e instanceof Error ? e.message : ''
@@ -224,17 +273,20 @@ export class CommandNode {
   }
 
   _evaluate(commandExecutor: WebDriverExecutor) {
-    let expression = interpolateScript(
-      this.command.target as string,
-      commandExecutor.variables
-    )
     if (ControlFlowCommandChecks.isTimes(this.command)) {
-      const number = Math.floor(+expression)
+      const number = Math.floor(
+        +interpolateString(`${this.command.target}`, commandExecutor.variables)
+      )
       if (isNaN(number)) {
         return Promise.reject(new Error('Invalid number provided as a target.'))
       }
       return this._evaluationResult({ value: this.timesVisited < number })
-    } else if (ControlFlowCommandChecks.isForEach(this.command)) {
+    }
+    let expression = interpolateScript(
+      this.command.target as string,
+      commandExecutor.variables
+    )
+    if (ControlFlowCommandChecks.isForEach(this.command)) {
       const result = this.evaluateForEach(commandExecutor.variables)
       if (!result) {
         this.emitControlFlowChange({

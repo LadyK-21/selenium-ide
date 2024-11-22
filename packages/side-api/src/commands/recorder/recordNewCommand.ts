@@ -1,7 +1,14 @@
 import { CommandShape } from '@seleniumhq/side-model'
 import update from 'lodash/fp/update'
-import { getActiveTest, getActiveCommandIndex } from '../../helpers/getActiveData'
-import { CoreSessionData, Mutator, RecordNewCommandInput } from '../../types'
+import {
+  getActiveTest,
+  getActiveCommandIndex,
+} from '../../helpers/getActiveData'
+import {
+  CoreSessionData,
+  Mutator,
+  RecordNewCommandInput,
+} from '../../types/base'
 import { mutator as addStepsMutator } from '../tests/addSteps'
 import { mutator as updateStepSelection } from '../state/updateStepSelection'
 
@@ -9,7 +16,8 @@ import { mutator as updateStepSelection } from '../state/updateStepSelection'
  * Adds new commands to the current test at the current index
  */
 export type Shape = (
-  cmd: RecordNewCommandInput
+  cmd: RecordNewCommandInput,
+  overrideRecorder?: boolean
 ) => Promise<CommandShape[] | null>
 
 const traverseFrame = (target: string) =>
@@ -35,9 +43,9 @@ const processSelectFrameCommands = (
   return sesh
 }
 
-const processStoreWindowHandle = (sesh: CoreSessionData) => {
-  const activeTest = getActiveTest(sesh)
-  const activeIndex = getActiveCommandIndex(sesh)
+const processStoreWindowHandle = (session: CoreSessionData) => {
+  const activeTest = getActiveTest(session)
+  const activeIndex = getActiveCommandIndex(session)
   const commands = activeTest.commands
   for (let i = 0, len = commands.length; i < len; i++) {
     let item = commands[i]
@@ -49,24 +57,20 @@ const processStoreWindowHandle = (sesh: CoreSessionData) => {
         target: 'root',
         value: '',
       }
-      sesh = addStepsMutator(sesh, {
-        params: [
-          sesh.state.activeTestID,
-          i - 1,
-          [],
-        ],
+      session = addStepsMutator(session, {
+        params: [session.state.activeTestID, i - 1, []],
         result: [storeWindowHandle],
       })
-      return updateStepSelection(sesh, {
+      return updateStepSelection(session, {
         params: [activeIndex + 1, false, false, true],
         result: undefined,
       })
     } else if (item.command === 'storeWindowHandle' && target === 'root') {
-      return sesh
+      return session
     }
   }
 
-  return sesh
+  return session
 }
 
 export const mutator: Mutator<Shape> = (

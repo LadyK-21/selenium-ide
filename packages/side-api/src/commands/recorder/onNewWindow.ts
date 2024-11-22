@@ -1,8 +1,15 @@
 import { CommandShape } from '@seleniumhq/side-model'
-import { BaseListener, EventMutator, RecordNewCommandInput } from '../../types'
+import {
+  BaseListener,
+  EventMutator,
+  RecordNewCommandInput,
+} from '../../types/base'
 import { mutator as recordNewCommandMutator } from './recordNewCommand'
 import { mutator as updateStepTestsMutator } from '../tests/updateStep'
-import { getActiveCommand } from '../../helpers/getActiveData'
+import {
+  getActiveCommand,
+  getActiveWindowHandleID,
+} from '../../helpers/getActiveData'
 
 type windowID = string
 type selectWindowStepID = string
@@ -17,33 +24,39 @@ export const mutator: EventMutator<OnNewWindowRecorder> = (
   session,
   [windowID, selectWindowStepID]
 ) => {
+  const activeCommand = getActiveCommand(session)!
+  const activeWindowHandleID = getActiveWindowHandleID(session) || 'root'
+  const consistentWindowID = activeCommand.windowHandleName || windowID
   const sessionWithPreviousStepUpdatedToOpenNewWindow = updateStepTestsMutator(
     session,
     {
       params: [
         session.state.activeTestID,
-        getActiveCommand(session).id,
+        activeCommand.id,
         {
           opensWindow: true,
-          windowHandleName: windowID,
+          windowHandleName: consistentWindowID,
           windowTimeout: 2000,
         },
       ],
       result: undefined,
     }
   )
+  if (!activeWindowHandleID) {
+    return sessionWithPreviousStepUpdatedToOpenNewWindow
+  }
   const selectWindowStep: CommandShape = {
     id: selectWindowStepID,
     command: 'selectWindow',
-    target: 'handle=${' + windowID + '}',
+    target: 'handle=${' + consistentWindowID + '}',
     value: '',
   }
-  const sessionWithselectWindowStep = recordNewCommandMutator(
+  const sessionWithSelectWindowStep = recordNewCommandMutator(
     sessionWithPreviousStepUpdatedToOpenNewWindow,
     {
       params: [selectWindowStep as RecordNewCommandInput],
       result: [selectWindowStep],
     }
   )
-  return sessionWithselectWindowStep
+  return sessionWithSelectWindowStep
 }

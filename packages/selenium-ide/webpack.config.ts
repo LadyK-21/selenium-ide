@@ -3,12 +3,19 @@ import fs from 'fs'
 import CopyWebpackPlugin from 'copy-webpack-plugin'
 import HtmlWebpackPlugin from 'html-webpack-plugin'
 import kebabCase from 'lodash/fp/kebabCase'
+import MiniCssExtractPlugin from 'mini-css-extract-plugin'
 import path from 'path'
 import {
   Configuration,
   SourceMapDevToolPlugin,
   WebpackPluginInstance,
 } from 'webpack'
+// eslint-disable-next-line node/no-unpublished-import
+import type { Configuration as DevServerConfiguration } from 'webpack-dev-server'
+
+const isProduction = process.env.NODE_ENV === 'production'
+const isDevelopment = !isProduction
+const useHMR = process.env.SIDE_DEV === '1' && isDevelopment
 
 const commonPlugins: WebpackPluginInstance[] = [
   new ForkTsCheckerWebpackPlugin(),
@@ -16,13 +23,19 @@ const commonPlugins: WebpackPluginInstance[] = [
     filename: '[file].map',
   }),
 ]
+if (isProduction) {
+  commonPlugins.push(new MiniCssExtractPlugin())
+}
+
 const commonConfig: Pick<
   Configuration,
   'devtool' | 'externals' | 'mode' | 'module' | 'resolve' | 'output'
-> = {
+> & {
+  devServer?: DevServerConfiguration
+} = {
   devtool: 'source-map',
   externals: ['utf-8-validate', 'bufferutil'],
-  mode: process.env.NODE_ENV === 'production' ? 'production' : 'development',
+  mode: isProduction ? 'production' : 'development',
   module: {
     rules: [
       {
@@ -32,15 +45,19 @@ const commonConfig: Pick<
       },
       {
         test: /\.tsx?$/,
-        loader: 'ts-loader',
         exclude: /node_modules/,
+        // eslint-disable-next-line node/no-unpublished-require
+        loader: require.resolve('ts-loader'),
         options: {
           transpileOnly: true,
         },
       },
       {
         test: /\.css$/i,
-        use: ['style-loader', 'css-loader'],
+        use: [
+          isProduction ? MiniCssExtractPlugin.loader : 'style-loader',
+          'css-loader',
+        ],
       },
       {
         test: /\.(png|woff|woff2|eot|ttf|svg)(\?v=[0-9]\.[0-9]\.[0-9])?$/,
@@ -53,6 +70,11 @@ const commonConfig: Pick<
       api: path.resolve(__dirname, 'src/api'),
       browser: path.resolve(__dirname, 'src/browser'),
       main: path.resolve(__dirname, 'src/main'),
+      '@mui/base': '@mui/base/modern',
+      '@mui/material': '@mui/material/modern',
+      '@mui/styled-engine': '@mui/styled-engine/modern',
+      '@mui/system': '@mui/system/modern',
+      '@mui/utils': '@mui/utils/modern',
     },
     extensions: ['.tsx', '.ts', '.js'],
   },
@@ -65,6 +87,7 @@ const commonConfig: Pick<
 // Our renderer and preload files
 const windowData = fs
   .readdirSync(path.join(__dirname, 'src', 'browser', 'windows'))
+  .filter((filename) => filename !== 'PlaybackWindowBidi')
   .map((filename) => [
     kebabCase(filename),
     path.join(__dirname, 'src', 'browser', 'windows', filename),
@@ -95,22 +118,70 @@ const rendererEntries = windowData
 
 const rendererConfig: Configuration = {
   ...commonConfig,
+  devServer: useHMR
+    ? {
+        devMiddleware: {
+          writeToDisk: true,
+        },
+        hot: isDevelopment,
+        port: 8083,
+      }
+    : undefined,
   entry: Object.fromEntries(rendererEntries),
   plugins: commonPlugins.concat(
     Object.values(rendererEntries).map(
       ([filename]) =>
         getBrowserPlugin(filename) as unknown as WebpackPluginInstance
-    ),
-    new CopyWebpackPlugin({
-      patterns: [
-        {
-          from: 'src/browser/*.css',
-          to: '[name].css',
-        },
-      ],
-    })
+    )
   ),
   target: 'electron-renderer',
+}
+
+const playbackPreloadBidiConfig: Configuration = {
+  ...commonConfig,
+  entry: {
+    'playback-window-bidi-preload': path.join(
+      __dirname,
+      'src',
+      'browser',
+      'windows',
+      'PlaybackWindowBidi',
+      'preload.ts'
+    ),
+  },
+  plugins: commonPlugins,
+  target: 'web',
+}
+
+const playbackRendererBidiConfig: Configuration = {
+  ...commonConfig,
+  entry: {
+    'playback-window-bidi-renderer': path.join(
+      __dirname,
+      'src',
+      'browser',
+      'windows',
+      'PlaybackWindowBidi',
+      'renderer.tsx'
+    ),
+  },
+  plugins: commonPlugins
+    .concat(
+      getBrowserPlugin(
+        'playback-window-bidi'
+      ) as unknown as WebpackPluginInstance
+    )
+    .concat(
+      new CopyWebpackPlugin({
+        patterns: [
+          {
+            from: 'src/browser/*.css',
+            to: '[name].css',
+          },
+        ],
+      })
+    ),
+  target: 'web',
 }
 
 const mainConfig: Configuration = {
@@ -122,14 +193,16 @@ const mainConfig: Configuration = {
   target: 'electron-main',
 }
 
-export default [mainConfig, preloadConfig, rendererConfig]
+export default [
+  rendererConfig,
+  preloadConfig,
+  playbackPreloadBidiConfig,
+  playbackRendererBidiConfig,
+  mainConfig,
+]
 
 function getBrowserPlugin(filename: string) {
   const componentName = filename.slice(0, -9)
-  const title = componentName
-    .split('-')
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ')
   const pluginHTML = new HtmlWebpackPlugin({
     filename: `${componentName}.html`,
     inject: false,
@@ -137,8 +210,13 @@ function getBrowserPlugin(filename: string) {
       <!doctype html>
       <html>
         <head>
-          <title>${title}</title>
+          <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
           <link rel="stylesheet" href="index.css" type="text/css">
+          ${
+            isProduction
+              ? `<link rel="stylesheet" href="${filename}.css" type="text/css">\n`
+              : ''
+          }
           <script defer src="${filename}-bundle.js"></script>
         </head>
         <body>

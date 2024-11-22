@@ -1,27 +1,43 @@
-import { Menu } from 'electron'
-import { Session } from 'main/types'
-import { editBasicsCommands } from './editBasics'
-import { projectEditorCommands } from './projectEditor'
-import { testEditorCommands } from './testEditor'
-import { projectViewCommands } from './projectView'
+import { MenuComponent, Session } from 'main/types'
+import { commands as editBasicsCommands } from './editBasics'
+import { commands as projectEditorCommands } from './projectEditor'
+import { commands as testEditorCommands } from './testEditor'
+import { commands as projectViewCommands } from './projectView'
 import { platform } from 'os'
+import { commands as helpMenuCommands } from './help'
+import { menuFactoryFromCommandFactory } from '../utils'
 
-const applicationMenu = (session: Session) => async () =>
-  Menu.buildFromTemplate([
+export const commands: MenuComponent = (session: Session) => () =>
+  [
     {
       label: 'Selenium IDE',
       submenu: [
-        { role: 'about' },
+        {
+          label: session.system.languageMap.electronMenuTree.about,
+          role: 'about',
+        },
         { type: 'separator' },
-        { role: 'services' },
+        {
+          label: session.system.languageMap.electronMenuTree.services,
+          role: 'services',
+        },
         { type: 'separator' },
-        { role: 'hide' },
-        { role: 'hideOthers' },
-        { role: 'unhide' },
+        {
+          label: session.system.languageMap.electronMenuTree.hideElectron,
+          role: 'hide',
+        },
+        {
+          label: session.system.languageMap.electronMenuTree.hideOthers,
+          role: 'hideOthers',
+        },
+        {
+          label: session.system.languageMap.electronMenuTree.showAll,
+          role: 'unhide',
+        },
         { type: 'separator' },
         {
           accelerator: platform() === 'win32' ? 'Alt+F4' : 'CommandOrControl+Q',
-          label: 'Quit',
+          label: session.system.languageMap.electronMenuTree.quit,
           click: async () => {
             await session.system.quit()
           },
@@ -29,20 +45,24 @@ const applicationMenu = (session: Session) => async () =>
       ],
     },
     {
-      label: '&File',
-      submenu: await projectEditorCommands(session)(),
+      label: session.system.languageMap.windowTab.file,
+      submenu: projectEditorCommands(session)(),
     },
     {
-      label: '&Edit',
+      label: session.system.languageMap.windowTab.edit,
       submenu: [
-        ...(await editBasicsCommands(session)()),
-        ...(await testEditorCommands(session)()),
+        ...editBasicsCommands(session)(),
+        ...testEditorCommands(session)(),
       ],
     },
     {
-      label: '&View',
-      submenu: await projectViewCommands(session)(),
+      label: session.system.languageMap.windowTab.view,
+      submenu: projectViewCommands(session)(),
     },
-  ])
+    {
+      label: session.system.languageMap.windowTab.help,
+      submenu: helpMenuCommands(session)(),
+    },
+  ]
 
-export default applicationMenu
+export default menuFactoryFromCommandFactory(commands)

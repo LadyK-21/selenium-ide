@@ -1,4 +1,4 @@
-import { ArgNames } from '@seleniumhq/side-model/src/ArgTypes'
+import { ArgNames } from '@seleniumhq/side-model/dist/ArgTypes'
 import React, { FC } from 'react'
 import CommandLocatorField from './LocatorField'
 import CommandTextField from './TextField'
@@ -10,6 +10,7 @@ const ArgField: FC<CommandArgFieldProps> = (props) => {
     command: { command },
     fieldName,
   } = props
+  // @ts-expect-error our shape traversal kinda sucks :(
   const arg = commands[command][fieldName]?.name as ArgNames
   switch (arg) {
     case 'alert text':

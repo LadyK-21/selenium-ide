@@ -5,13 +5,15 @@ import makeKeyboundNav from 'browser/hooks/useKeyboundNav'
 import useReorderPreview from 'browser/hooks/useReorderPreview'
 import React, { FC } from 'react'
 import CommandListItem from './TestCommandListItem'
-import EditorToolbar from '../../components/Drawer/EditorToolbar'
+import EditorToolbar from '../../../../components/Drawer/EditorToolbar'
+import { FormattedMessage, useIntl } from 'react-intl'
+import languageMap from 'browser/I18N/keys'
 
 export interface CommandListProps {
   activeTest: string
-  bottomOffset: number
   commands: CommandShape[]
   commandStates: CommandsStateShape
+  disabled?: boolean
   selectedCommandIndexes: number[]
 }
 
@@ -19,11 +21,12 @@ const useKeyboundNav = makeKeyboundNav(window.sideAPI.state.updateStepSelection)
 
 const CommandList: FC<CommandListProps> = ({
   activeTest,
-  bottomOffset,
   commandStates,
   commands,
+  disabled = false,
   selectedCommandIndexes,
 }) => {
+  const intl = useIntl()
   const [preview, reorderPreview, resetPreview] = useReorderPreview(
     commands,
     selectedCommandIndexes,
@@ -31,51 +34,61 @@ const CommandList: FC<CommandListProps> = ({
   )
   useKeyboundNav(commands, selectedCommandIndexes)
   return (
-    <ReorderableList
-      bottomOffset={bottomOffset}
-      dense
-      subheader={
-        <EditorToolbar
-          sx={{ top: '48px', zIndex: 100 }}
-          onAdd={() =>
-            window.sideAPI.tests.addSteps(
-              activeTest,
-              Math.max(selectedCommandIndexes.slice(-1)[0], 0)
-            )
-          }
-          onRemove={
-            commands.length > 1
-              ? () =>
-                  window.sideAPI.tests.removeSteps(
-                    activeTest,
-                    selectedCommandIndexes
-                  )
-              : undefined
-          }
-        >
-          <span className="ml-4">Commands</span>
-        </EditorToolbar>
-      }
-    >
-      {preview.map(([command, origIndex], index) => {
-        if (!command) {
-          return null
+    <>
+      <EditorToolbar
+        className="z-1"
+        elevation={2}
+        disabled={disabled}
+        onAdd={() =>
+          window.sideAPI.tests.addSteps(
+            activeTest,
+            Math.max(selectedCommandIndexes.slice(-1)[0], 0)
+          )
         }
-        const { id } = command
-        return (
-          <CommandListItem
-            activeTest={activeTest}
-            command={command}
-            commandState={commandStates[id]}
-            key={id}
-            index={index}
-            reorderPreview={reorderPreview}
-            resetPreview={resetPreview}
-            selected={selectedCommandIndexes.includes(origIndex)}
-          />
-        )
-      })}
-    </ReorderableList>
+        addText={intl.formatMessage({ id: languageMap.testCore.addCommand })}
+        onRemove={
+          commands.length > 1
+            ? () =>
+                window.sideAPI.tests.removeSteps(
+                  activeTest,
+                  selectedCommandIndexes
+                )
+            : undefined
+        }
+        removeText={intl.formatMessage({ id: languageMap.testCore.removeCommand })}
+      >
+        <span className="ms-4">
+          <FormattedMessage id={languageMap.testCore.commands} />
+        </span>
+      </EditorToolbar>
+      <ReorderableList
+        classes={{
+          root: 'flex-1 flex-col overflow-y pt-0',
+        }}
+        dense
+        aria-disabled={disabled}
+      >
+        {preview.map(([command, origIndex], index) => {
+          if (!command) {
+            return null
+          }
+          const { id } = command
+          return (
+            <CommandListItem
+              activeTest={activeTest}
+              command={command}
+              commandState={commandStates[id]}
+              disabled={disabled}
+              key={id}
+              index={index}
+              reorderPreview={reorderPreview}
+              resetPreview={resetPreview}
+              selected={selectedCommandIndexes.includes(origIndex)}
+            />
+          )
+        })}
+      </ReorderableList>
+    </>
   )
 }
 

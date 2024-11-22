@@ -1,19 +1,19 @@
-import { Menu } from 'electron'
-import { MenuComponent, Session } from 'main/types'
+import { MenuComponent } from 'main/types'
+import { menuFactoryFromCommandFactory } from '../utils'
 
-export const projectEditorCommands: MenuComponent = (session) => async () =>
+export const commands: MenuComponent = (session) => () =>
   [
     {
       accelerator: 'CommandOrControl+N',
-      label: 'New Project',
+      label: session.system.languageMap.fileMenuTree.newProject,
       click: async () => {
-        await session.projects.new()
+        await session.api.projects.new()
       },
     },
     { type: 'separator' },
     {
       accelerator: 'CommandOrControl+O',
-      label: 'Load Project',
+      label: session.system.languageMap.fileMenuTree.loadProject,
       click: async () => {
         const response = await session.dialogs.open()
         if (response.canceled) return
@@ -22,11 +22,11 @@ export const projectEditorCommands: MenuComponent = (session) => async () =>
     },
     {
       accelerator: 'CommandOrControl+R',
-      label: 'Recent Projects',
+      label: session.system.languageMap.fileMenuTree.recentProjects,
       click: async () => {
         await session.projects.showRecents()
       },
-      submenu: (await session.projects.getRecent()).map((project) => ({
+      submenu: session.projects.getRecent().map((project) => ({
         click: async () => {
           await session.api.projects.load(project)
         },
@@ -36,7 +36,7 @@ export const projectEditorCommands: MenuComponent = (session) => async () =>
     { type: 'separator' },
     {
       accelerator: 'CommandOrControl+S',
-      label: 'Save Project',
+      label: session.system.languageMap.fileMenuTree.saveProject,
       click: async () => {
         await session.projects.save(session.projects.filepath as string)
       },
@@ -44,7 +44,7 @@ export const projectEditorCommands: MenuComponent = (session) => async () =>
     },
     {
       accelerator: 'CommandOrControl+Shift+S',
-      label: 'Save Project As...',
+      label: session.system.languageMap.fileMenuTree.saveProjectAs,
       click: async () => {
         const response = await session.dialogs.openSave()
         if (response.canceled) return
@@ -57,9 +57,4 @@ export const projectEditorCommands: MenuComponent = (session) => async () =>
     },
   ]
 
-const projectEditorMenu = (session: Session) => async () => {
-  const menuItems = await projectEditorCommands(session)()
-  return Menu.buildFromTemplate(menuItems)
-}
-
-export default projectEditorMenu
+export default menuFactoryFromCommandFactory(commands)

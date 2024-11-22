@@ -1,8 +1,8 @@
-import { CommandShape } from '@seleniumhq/side-model'
+import { CommandShape, Commands } from '@seleniumhq/side-model'
 import { CommandTypes } from '@seleniumhq/side-model/dist/Commands'
 import { badIndex } from '../../constants/badIndex'
 import { loadingID } from '../../constants/loadingID'
-import { CommandsStateShape } from './command'
+import { CommandStateShape, CommandsStateShape } from './command'
 
 /**
  * State data is the data from the active IDE session that will not be persisted.
@@ -12,16 +12,28 @@ import { CommandsStateShape } from './command'
 export interface EditorStateShape {
   configSettingsGroup: ConfigSettingsGroup
   copiedCommands: Omit<CommandShape, 'id'>[]
+  overrideWindowSize: {
+    active: boolean
+    height: number
+    width: number
+  }
   selectedCommandIndexes: number[]
   selectedTestIndexes: number[]
+  showDrawer: boolean
   suiteMode: 'viewer' | 'editor'
 }
 
 export const defaultEditorState: EditorStateShape = {
   configSettingsGroup: 'project',
   copiedCommands: [],
+  overrideWindowSize: {
+    active: false,
+    height: 600,
+    width: 800,
+  },
   selectedCommandIndexes: [],
   selectedTestIndexes: [],
+  showDrawer: true,
   suiteMode: 'editor',
 }
 
@@ -33,7 +45,7 @@ export const defaultRecorderState: RecorderStateShape = {
   activeFrame: 'root',
 }
 
-export type ConfigSettingsGroup = 'project' | 'system'
+export type ConfigSettingsGroup = 'project' | 'system' | 'outPut'
 export type VerboseBoolean = 'Yes' | 'No'
 export type InsertCommandPref = 'Before' | 'After'
 export type ThemePref = 'Dark' | 'Light' | 'System'
@@ -56,13 +68,20 @@ export const defaultUserPrefs: UserPrefs = {
   ignoreCertificateErrorsPref: 'No',
 }
 
+export type TestResultShape = Pick<
+  CommandStateShape,
+  'error' | 'message' | 'state'
+> & {
+  lastCommand: CommandShape | null
+}
+
 export interface PlaybackStateShape {
   commands: CommandsStateShape
   currentIndex: number
   currentTestIndex: number
   stopIndex: number
   tests: string[]
-  testResults: Record<string, { lastCommand: string }>
+  testResults: Record<string, TestResultShape>
 }
 
 export const defaultPlaybackState: PlaybackStateShape = {
@@ -80,26 +99,42 @@ export interface StateShape {
   breakpoints: string[]
   commands: CommandTypes
   editor: EditorStateShape
-  userPrefs: UserPrefs
+  locators: string[]
   logs: string[]
   logPath: string
   playback: PlaybackStateShape
   recorder: RecorderStateShape
   status: 'idle' | 'paused' | 'playing' | 'recording'
+  userPrefs: UserPrefs
 }
 
 export const state: StateShape = {
   activeSuiteID: loadingID,
   activeTestID: loadingID,
   breakpoints: [],
-  commands: {},
+  commands: Commands,
   editor: defaultEditorState,
-  userPrefs: defaultUserPrefs,
+  locators: [
+    'css:data-test-id',
+    'id',
+    'linkText',
+    'name',
+    'css:data-attr',
+    'css:finder',
+    'xpath:link',
+    'xpath:img',
+    'xpath:attributes',
+    'xpath:idRelative',
+    'xpath:href',
+    'xpath:position',
+    'xpath:innerText',
+  ],
   logs: [],
   logPath: '',
   playback: defaultPlaybackState,
   recorder: defaultRecorderState,
   status: 'idle',
+  userPrefs: defaultUserPrefs,
 }
 
 export * from './command'

@@ -1,14 +1,14 @@
 import { WindowConfig } from 'browser/types'
 import Electron from 'electron'
+import { platform } from 'os'
 
-const width = 550
 export const window: WindowConfig['window'] = () => {
   const display = Electron.screen.getPrimaryDisplay()
   return {
-    x: display.bounds.width - width,
-    y: 20,
-    width,
-    height: display.bounds.height - 200,
-    title: 'Project Editor',
+    x: 50,
+    y: 50,
+    width: display.bounds.width - 100,
+    height: display.bounds.height - 100,
+    titleBarStyle: platform() === 'darwin' ? 'hidden' : 'default',
   }
 }

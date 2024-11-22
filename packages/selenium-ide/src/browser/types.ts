@@ -1,7 +1,6 @@
-import { CoreSessionData } from '@seleniumhq/side-api'
+import type { Api, CoreSessionData } from '@seleniumhq/side-api'
 import { BrowserWindowConstructorOptions } from 'electron'
 import { Session } from 'main/types'
-import type { Api } from './api'
 import ApiMutators from './api/mutator'
 import Recorder from './windows/PlaybackWindow/preload/recorder'
 
@@ -10,7 +9,9 @@ declare global {
     __originalPrompt: typeof window['prompt']
     __originalConfirmation: typeof window['confirm']
     __originalAlert: typeof window['alert']
-    sideAPI: Api & { mutators: typeof ApiMutators }
+    sideAPI: Api & { mutators: typeof ApiMutators } & {
+      resolveAPI?: (id: string, ...args: any[]) => void
+    }
   }
 }
 
@@ -19,7 +20,7 @@ export type CurriedApiField<Config extends any[], Shape> = (
 ) => (name: string, context: Session | Window) => Shape
 
 export interface WindowConfig {
-  window: (session: Session) => BrowserWindowConstructorOptions
+  window: () => BrowserWindowConstructorOptions
 }
 
 export interface BrowserState extends CoreSessionData {}

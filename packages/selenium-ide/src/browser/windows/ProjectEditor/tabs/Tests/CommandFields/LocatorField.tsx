@@ -1,6 +1,6 @@
 import HelpCenter from '@mui/icons-material/HelpCenter'
 import AddToHomeScreenIcon from '@mui/icons-material/AddToHomeScreen'
-import FindInPageIcon from '@mui/icons-material/FindInPage';
+import FindInPageIcon from '@mui/icons-material/FindInPage'
 import Autocomplete from '@mui/material/Autocomplete'
 import FormControl from '@mui/material/FormControl'
 import IconButton from '@mui/material/IconButton'
@@ -10,20 +10,20 @@ import capitalize from 'lodash/fp/capitalize'
 import React, { FC, useEffect } from 'react'
 import { updateField, updateFieldAutoComplete } from './utils'
 import { CommandArgFieldProps } from '../types'
+import languageMap from 'browser/I18N/keys'
+import { useIntl } from 'react-intl'
 
 type PluralField = 'targets' | 'values'
 
 const CommandLocatorField: FC<CommandArgFieldProps> = ({
   command,
-  commands,
+  disabled,
   fieldName,
   testID,
 }) => {
+  const intl = useIntl()
   const fieldNames = (fieldName + 's') as PluralField
   const FieldName = capitalize(fieldName)
-
-  const fullnote = commands[command.command][fieldName]?.description ?? ''
-  const label = fullnote ? FieldName + ' - ' + fullnote : FieldName
 
   const updateTarget = updateField(fieldName)
   const updateTargetAutoComplete = updateFieldAutoComplete(fieldName)
@@ -40,10 +40,31 @@ const CommandLocatorField: FC<CommandArgFieldProps> = ({
     setLocalValue(command[fieldName])
   }, [command.id])
 
+  // 处理label标签
+  const handleLabel = (value: string) => {
+    switch (value) {
+      case 'Comment':
+        return intl.formatMessage({ id: languageMap.testCore.comment })
+      case 'Target':
+        return intl.formatMessage({ id: languageMap.testCore.target })
+      case 'Value':
+        return intl.formatMessage({ id: languageMap.testCore.value })
+      default:
+        return value
+    }
+  }
+  const fullnote = intl.formatMessage({
+    id: `commandMap.${command.command}.${fieldName}.description`,
+  });
+  const label = fullnote
+    ? handleLabel(FieldName) + ' - ' + fullnote
+    : handleLabel(FieldName)
+
   return (
     <FormControl className="flex flex-row">
       <Autocomplete
         className="flex-1"
+        disabled={disabled}
         freeSolo
         inputValue={localValue || ''}
         componentsProps={{
@@ -53,8 +74,7 @@ const CommandLocatorField: FC<CommandArgFieldProps> = ({
             },
           },
         }}
-        onChange={(event: any, newValue: string | null) => {
-          console.log(event)
+        onChange={(_event: any, newValue: string | null) => {
           onChange(newValue)
         }}
         onContextMenu={() => {
@@ -80,7 +100,8 @@ const CommandLocatorField: FC<CommandArgFieldProps> = ({
         value={localValue || ''}
       />
       <IconButton
-        className="ml-4"
+        className="ms-4"
+        disabled={disabled}
         onClick={() =>
           window.sideAPI.recorder.requestHighlightElement(fieldName)
         }
@@ -88,6 +109,7 @@ const CommandLocatorField: FC<CommandArgFieldProps> = ({
         <FindInPageIcon />
       </IconButton>
       <IconButton
+        disabled={disabled}
         onClick={() =>
           window.sideAPI.recorder.requestSelectElement(true, fieldName)
         }

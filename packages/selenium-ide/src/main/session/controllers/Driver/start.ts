@@ -3,9 +3,9 @@ import { ChildProcess, spawn } from 'child_process'
 import { app } from 'electron'
 import * as fs from 'fs-extra'
 import { BrowserInfo, Session } from 'main/types'
-import * as path from 'path'
+import * as path from 'node:path'
 import * as os from 'os'
-import { COLOR_MAGENTA, COLOR_YELLOW, vdebuglog } from 'main/util'
+import { COLOR_MAGENTA, COLOR_YELLOW, isAutomated, vdebuglog } from 'main/util'
 
 const successMessage = 'was started successfully.'
 export interface DriverStartSuccess {
@@ -20,7 +20,7 @@ export interface DriverStartFailure {
 export const WebdriverDebugLog = vdebuglog('webdriver', COLOR_MAGENTA)
 export const WebdriverDebugLogErr = vdebuglog('webdriver-error', COLOR_YELLOW)
 
-export const port = app.isPackaged ? 9516 : 9515
+export const port = isAutomated ? 9518 : app.isPackaged ? 9516 : 9515
 
 /**
  * This module is just an async function that does the following:
@@ -30,18 +30,14 @@ export const port = app.isPackaged ? 9516 : 9515
  *   4. When Electron is quitting, close the child driver process
  */
 
+const electronBinary = `chromedriver${os.platform() === 'win32' ? '.exe' : ''}`
+const ourElectronPath = __non_webpack_require__.resolve(
+  path.join('electron-chromedriver', 'bin', electronBinary)
+)
+
 const getDriver = ({ browser, version }: BrowserInfo) =>
   (browser === 'electron'
-    ? path.resolve(
-        path.join(
-          __dirname,
-          '..',
-          'node_modules',
-          'electron-chromedriver',
-          'bin',
-          'chromedriver' + (os.platform() === 'win32' ? '.exe' : '')
-        )
-      )
+    ? ourElectronPath
     : path.resolve(
         path.join(
           __dirname,
@@ -59,13 +55,23 @@ const getDriver = ({ browser, version }: BrowserInfo) =>
 export type StartDriver = (
   session: Session
 ) => (info: BrowserInfo) => Promise<DriverStartSuccess | DriverStartFailure>
-const startDriver: StartDriver = () => (info) =>
+
+const startDriver: StartDriver = (session: Session) => (info) =>
   new Promise((resolve) => {
     let initialized = false
     const args = ['--verbose', `--port=${port}`]
     const driverPath = getDriver(info)
+    console.log(
+      'Starting driver',
+      info.browser,
+      'at',
+      driverPath,
+      'with args',
+      args.join(' ')
+    )
     if (fs.existsSync(driverPath)) {
-      const driver = spawn(driverPath.replace(/\s/g, '\ '), args, {
+      const driver = spawn(driverPath.replace(/\s/g, ' '), args, {
+        detached: true,
         env: {},
         shell: false,
       })
@@ -77,6 +83,15 @@ const startDriver: StartDriver = () => (info) =>
           initialized = true
           WebdriverDebugLog('Driver has initialized!')
           resolve({ success: true, driver: driver })
+          process.on('beforeExit', async () => {
+            try {
+              if (!driver.killed) {
+                await driver.kill(9)
+              }
+            } catch (e) {
+              console.warn('Failed to kill driver', e)
+            }
+          })
         }
       })
       driver.stderr.on('data', (err: string) => {
@@ -86,15 +101,32 @@ const startDriver: StartDriver = () => (info) =>
           resolve({ success: false, error: errStr })
         }
       })
+      driver.on('error', (err: Error) => {
+        err.message = 'Webdriver process error: ' + err.message
+        WebdriverDebugLogErr(err)
+        if (!initialized) {
+          return resolve({
+            success: false,
+            error: err.message,
+          })
+        }
+        if (!session.driver.stopped) {
+          startDriver(session)(info)
+        }
+      })
+
       driver.on('close', (code: number) => {
         if (code) {
           WebdriverDebugLogErr(`driver has exited with code ${code}`)
           if (!initialized) {
-            resolve({
+            return resolve({
               success: false,
               error: 'Process has exited before starting with code ' + code,
             })
           }
+        }
+        if (!session.driver.stopped) {
+          startDriver(session)(info)
         }
       })
     } else {

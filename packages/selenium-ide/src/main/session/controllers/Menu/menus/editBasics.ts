@@ -1,19 +1,27 @@
-import { Menu } from 'electron'
-import { MenuComponent, Session } from 'main/types'
+import { MenuComponent } from 'main/types'
+import { menuFactoryFromCommandFactory } from '../utils'
 
-export const editBasicsCommands: MenuComponent = () => async () =>
+export const commands: MenuComponent = (session) => () =>
   [
-    { label: 'Undo', role: 'undo' },
-    { label: 'Redo', role: 'redo' },
+    {
+      accelerator: 'CommandOrControl+Z',
+      click: () => session.api.state.undo(),
+      enabled: session.state.prevHistory.length !== 0,
+      label: session.system.languageMap.editMenuTree.undo,
+    },
+    {
+      accelerator: 'CommandOrControl+Shift+Z',
+      click: () => session.api.state.redo(),
+      enabled: session.state.nextHistory.length !== 0,
+      label: session.system.languageMap.editMenuTree.redo,
+    },
     { type: 'separator' },
-    { label: 'Cut', role: 'cut' },
-    { label: 'Copy', role: 'copy' },
-    { label: 'Paste', role: 'paste' },
+    { label: session.system.languageMap.editMenuTree.cut, role: 'cut' },
+    { label: session.system.languageMap.editMenuTree.copy, role: 'copy' },
+    {
+      label: session.system.languageMap.editMenuTree.paste,
+      role: 'paste',
+    },
   ]
 
-const editBasicsMenu = (session: Session) => async () => {
-  const menuItems = await editBasicsCommands(session)()
-  return Menu.buildFromTemplate(menuItems)
-}
-
-export default editBasicsMenu
+export default menuFactoryFromCommandFactory(commands)

@@ -1,55 +1,46 @@
-import Box from '@mui/material/Box'
-import { loadingID } from '@seleniumhq/side-api/dist/constants/loadingID'
 import AppWrapper from 'browser/components/AppWrapper'
-import subscribeToSession from 'browser/helpers/subscribeToSession'
-import React from 'react'
-import { DndProvider } from 'react-dnd'
-import { HTML5Backend } from 'react-dnd-html5-backend'
-import AppBar from './components/AppBar'
-import Drawer from './components/Drawer'
-import Main from './components/Main'
 import renderWhenReady from 'browser/helpers/renderWhenReady'
-import { TAB, TESTS_TAB } from './enums/tab'
+import React from 'react'
+import { Panel, PanelGroup } from 'react-resizable-panels'
+import SIDELogger from 'browser/components/Logger'
+import PlaybackControls from 'browser/components/PlaybackControls'
+import ProjectPlaybackWindow from 'browser/components/PlaybackPanel'
+import ProjectEditor from 'browser/components/ProjectEditor'
+import { usePanelGroup } from 'browser/hooks/usePanelGroup'
+import { SessionContextProviders } from 'browser/contexts/provider'
+import ResizeHandle from 'browser/components/ResizeHandle'
 
-const ProjectEditor = () => {
-  const session = subscribeToSession()
-  const {
-    project: { id },
-  } = session
+const ProjectMainWindow = () => (
+  <AppWrapper>
+    <SessionContextProviders>
+      <PanelGroup
+        direction="horizontal"
+        id="editor-playback"
+        {...usePanelGroup('editor-playback')}
+      >
+        <Panel id="editor-panel">
+          <ProjectEditor />
+        </Panel>
+        <ResizeHandle id="h-resize-2" y />
+        <Panel id="playback-logger-panel">
+          <PanelGroup
+            direction="vertical"
+            id="playback-logger"
+            {...usePanelGroup('playback-logger')}
+          >
+            <PlaybackControls />
+            <Panel id="playback-panel">
+              <ProjectPlaybackWindow />
+            </Panel>
+            <ResizeHandle id="playback-logger-resize" x />
+            <Panel className="pos-rel" id="logger-panel">
+              <SIDELogger />
+            </Panel>
+          </PanelGroup>
+        </Panel>
+      </PanelGroup>
+    </SessionContextProviders>
+  </AppWrapper>
+)
 
-  const [tab, setTab] = React.useState<TAB>(TESTS_TAB)
-  const [openDrawer, setOpenDrawer] = React.useState(true)
-
-  if (id == loadingID) {
-    return <div id="loading" />
-  }
-
-  return (
-    <AppWrapper>
-      <DndProvider backend={HTML5Backend}>
-        <Box className="flex">
-          <AppBar
-            openDrawer={openDrawer}
-            session={session}
-            setOpenDrawer={setOpenDrawer}
-            setTab={setTab}
-            tab={tab}
-          />
-          <Drawer
-            open={openDrawer}
-            session={session}
-            setOpen={setOpenDrawer}
-            tab={tab}
-          />
-          <Main
-            openDrawer={openDrawer}
-            session={session}
-            tab={tab}
-          />
-        </Box>
-      </DndProvider>
-    </AppWrapper>
-  )
-}
-
-renderWhenReady(ProjectEditor)
+renderWhenReady(ProjectMainWindow)

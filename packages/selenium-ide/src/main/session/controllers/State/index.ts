@@ -1,5 +1,5 @@
 import { getCommandIndex } from '@seleniumhq/side-api/dist/helpers/getActiveData'
-import { state as defaultState } from '@seleniumhq/side-api'
+import { state as defaultState, Mutator } from '@seleniumhq/side-api'
 import {
   CamelCaseNamesPref,
   CoreSessionData,
@@ -11,18 +11,79 @@ import {
   UserPrefs,
 } from '@seleniumhq/side-api'
 import clone from 'lodash/fp/clone'
-import storage from 'main/store'
+import merge from 'lodash/fp/merge'
 import BaseController from '../Base'
+import { loadingID } from '@seleniumhq/side-api/dist/constants/loadingID'
+import getCore from 'main/api/helpers/getCore'
+
+const queue = (op: () => void) => setTimeout(op, 0)
 
 export default class StateController extends BaseController {
-  static pathFromID = (id: string) => id.replace(/\-/g, '_')
+  static pathFromID = (id: string) => id.replace(/-/g, '_')
+
+  prevHistory: CoreSessionData[] = []
+  nextHistory: CoreSessionData[] = []
 
   state: StateShape = clone(defaultState)
 
-  async get(): Promise<CoreSessionData> {
+  appendHistory(path: string) {
+    if (path.includes('setAll')) return
+    if (this.session.projects.project.id !== loadingID) {
+      this.prevHistory.push(this.get())
+      this.nextHistory = []
+    }
+  }
+
+  async undo() {
+    const prev = this.prevHistory.pop()
+    if (prev) {
+      this.nextHistory.push(this.get())
+      this.session.api.state.setAll(prev)
+    }
+  }
+
+  async redo() {
+    const next = this.nextHistory.pop()
+    if (next) {
+      this.prevHistory.push(this.get())
+      this.session.api.state.setAll(next)
+    }
+  }
+
+  async mutate<T extends (...args: any[]) => any>(
+    mutator: undefined | Mutator<T>,
+    params: Parameters<T>,
+    result: Awaited<ReturnType<T>>,
+    path: string
+  ) {
+    if (!mutator) return
+    this.appendHistory(path)
+    const { project, state } = mutator(getCore(this.session), {
+      params,
+      result,
+    })
+    this.session.projects.project = project
+    this.session.state.state = state
+    this.session.api.state.onMutate.dispatchEvent(path, { params, result })
+  }
+
+  get(): CoreSessionData {
     return {
       project: this.session.projects.project,
       state: this.state,
+    }
+  }
+
+  setAll(data: CoreSessionData) {
+    this.session.projects.project = data.project
+    this.state = data.state
+  }
+
+  set(key: string, _data: any) {
+    if (key.includes('editor.overrideWindowSize')) {
+      queue(async () => {
+        await this.session.resizablePanels.recalculatePlaybackWindows()
+      })
     }
   }
 
@@ -35,18 +96,25 @@ export default class StateController extends BaseController {
   async onProjectLoaded() {
     // If this file has been saved, fetch state
     if (this.session.projects.filepath) {
-      this.state = {
-        ...defaultState,
-        ...storage.get(this.getStatePath()),
-        commands: this.state.commands,
+      console.log('Initializing state')
+      const storageState: StateShape = this.session.store.get(
+        this.getStatePath()
+      )
+      const newState: StateShape = merge(defaultState, storageState)
+      newState.commands = this.state.commands
+      newState.editor.selectedCommandIndexes = [0]
+      if (!newState.activeTestID || newState.activeTestID === loadingID) {
+        newState.activeTestID =
+          this.session.projects.project.tests?.[0]?.id ?? loadingID
       }
+      this.state = newState
     }
   }
 
   async onProjectUnloaded() {
     if (this.session.projects.filepath) {
       // If this file has been loaded or saved, save state
-      storage.set(this.getStatePath(), {
+      this.session.store.set(this.getStatePath(), {
         ...this.state,
         playback: defaultState.playback,
         recorder: defaultState.recorder,
@@ -64,38 +132,43 @@ export default class StateController extends BaseController {
   }
 
   async toggleUserPrefCamelCase(camelCaseNamesPref: CamelCaseNamesPref) {
-    const userPrefs = await storage.get<'userPrefs'>(
+    const userPrefs = await this.session.store.get(
       'userPrefs',
       defaultUserPrefs
     )
-    storage.set<'userPrefs'>('userPrefs', { ...userPrefs, camelCaseNamesPref })
+    this.session.store.set('userPrefs', { ...userPrefs, camelCaseNamesPref })
   }
 
   async toggleUserPrefTheme(themePref: ThemePref) {
-    const userPrefs = await storage.get<'userPrefs'>(
+    const userPrefs = await this.session.store.get(
       'userPrefs',
       defaultUserPrefs
     )
-    storage.set<'userPrefs'>('userPrefs', { ...userPrefs, themePref })
+    this.session.store.set('userPrefs', { ...userPrefs, themePref })
   }
 
   async toggleUserPrefInsert(insertCommandPref: InsertCommandPref) {
-    const userPrefs = await storage.get<'userPrefs'>(
+    const userPrefs = await this.session.store.get(
       'userPrefs',
       defaultUserPrefs
     )
-    storage.set<'userPrefs'>('userPrefs', { ...userPrefs, insertCommandPref })
+    this.session.store.set('userPrefs', { ...userPrefs, insertCommandPref })
   }
 
-  async toggleUserPrefIgnoreCertificateErrors(ignoreCertificateErrorsPref: IgnoreCertificateErrorsPref) {
-    const userPrefs = await storage.get<'userPrefs'>(
+  async toggleUserPrefIgnoreCertificateErrors(
+    ignoreCertificateErrorsPref: IgnoreCertificateErrorsPref
+  ) {
+    const userPrefs = await this.session.store.get(
       'userPrefs',
       defaultUserPrefs
     )
-    storage.set<'userPrefs'>('userPrefs', { ... userPrefs, ignoreCertificateErrorsPref})
+    this.session.store.set('userPrefs', {
+      ...userPrefs,
+      ignoreCertificateErrorsPref,
+    })
   }
 
   async getUserPrefs(): Promise<UserPrefs> {
-    return storage.get<'userPrefs'>('userPrefs', defaultUserPrefs)
+    return this.session.store.get('userPrefs', defaultUserPrefs)
   }
 }

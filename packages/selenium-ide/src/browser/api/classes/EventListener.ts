@@ -1,10 +1,13 @@
 import { ipcRenderer } from 'electron'
 import { BaseListener, VariadicArgs } from '@seleniumhq/side-api'
 
+const isDefined = <T>(value: T | undefined): value is T => {
+  return value !== undefined
+}
 
 const baseListener = <ARGS extends VariadicArgs>(
   path: string
-): BaseListener<ARGS> => {
+): BaseListener<ARGS> & { emitEvent: (...args: ARGS) => void } => {
   const listeners: any[] = []
   return {
     addListener(listener) {
@@ -12,9 +15,15 @@ const baseListener = <ARGS extends VariadicArgs>(
       ipcRenderer.send(`${path}.addListener`)
       listeners.push(listener)
     },
-    dispatchEvent(...args) {
+    async dispatchEvent(...args) {
       console.debug(path, 'dispatching event')
-      listeners.forEach((fn) => fn(...args))
+      const results = await Promise.all(listeners.map((fn) => fn(...args)))
+      ipcRenderer.send(`${path}.response`, results.filter(isDefined))
+      return results
+    },
+    emitEvent(...args) {
+      console.debug(path, 'emitting event')
+      ipcRenderer.send(`${path}.emit`, ...args)
     },
     hasListener(listener) {
       return listeners.includes(listener)
@@ -34,9 +43,13 @@ const baseListener = <ARGS extends VariadicArgs>(
 
 const wrappedListener = <ARGS extends VariadicArgs>(path: string) => {
   const api = baseListener<ARGS>(path)
-  ipcRenderer.on(path, (_event, ...args) =>
+  const handler = (_event: Electron.IpcRendererEvent, ...args: any[]) =>
     api.dispatchEvent(...(args as ARGS))
-  )
+
+  ipcRenderer.addListener(path, handler)
+  window.addEventListener('beforeunload', () => {
+    ipcRenderer.removeListener(path, handler)
+  })
   return api
 }
 
